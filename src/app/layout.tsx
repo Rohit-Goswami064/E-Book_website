@@ -56,6 +56,11 @@ export const metadata: Metadata = {
       "max-snippet": -1,
     },
   },
+  icons: {
+    icon: "/hiddenbook_logo.png",
+    shortcut: "/hiddenbook_logo.png",
+    apple: "/hiddenbook_logo.png",
+  },
   openGraph: {
     type: "website",
     locale: "en_US",
@@ -63,11 +68,20 @@ export const metadata: Metadata = {
     siteName: "HiddenBooks",
     title: "HiddenBooks — Premium Digital eBook Destination",
     description: "Curated books, seamless reader, and timeless knowledge.",
+    images: [
+      {
+        url: "/hiddenbook_logo.png",
+        width: 1254,
+        height: 1254,
+        alt: "HiddenBooks Logo",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "HiddenBooks",
     description: "Curated books, seamless reader, and timeless knowledge.",
+    images: ["/hiddenbook_logo.png"],
   },
 };
 

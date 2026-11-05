@@ -17,8 +17,13 @@ export async function GET() {
       adminClient.from("pages").select("*").order("title", { ascending: true }),
     ])
 
+    const formattedSections = (sectionsRes.data || []).map((s: any) => ({
+      ...s,
+      is_active: s.is_enabled !== undefined ? s.is_enabled : s.is_active ?? true,
+    }))
+
     return NextResponse.json({
-      sections: sectionsRes.data || [],
+      sections: formattedSections,
       settings: settingsRes.data || [],
       pages: pagesRes.data || [],
     })
@@ -40,13 +45,14 @@ export async function PUT(request: Request) {
     const adminClient = createAdminClient()
 
     if (type === "section") {
-      const { id, title, subtitle, is_active, display_order } = payload
+      const { id, title, subtitle, is_active, is_enabled, display_order } = payload
+      const enabledVal = is_enabled !== undefined ? is_enabled : is_active !== undefined ? is_active : true
       const { data, error } = await adminClient
         .from("homepage_sections")
         .update({
           title,
           subtitle,
-          is_active,
+          is_enabled: enabledVal,
           display_order,
           updated_at: new Date().toISOString(),
         })

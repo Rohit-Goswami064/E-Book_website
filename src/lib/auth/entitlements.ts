@@ -1,5 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
+import { createClient } from "@/lib/supabase/server"
 import { getUserRole } from "@/lib/auth/roles"
+import { dbQuery } from "@/lib/db"
 
 export interface AccessVerificationResult {
   authorized: boolean
@@ -34,18 +36,33 @@ export async function verifyPublicationAccess(
   }
 
   try {
-    // Authoritative client with Next.js cache bypassing (cache: 'no-store')
     const supabase = createAdminClient()
 
     // 1. Fetch authoritative publication record from database
-    const { data: book, error: bookError } = await supabase
-      .from("books")
-      .select("id, title, is_free, is_published, price_cents")
-      .eq("id", publicationId)
-      .maybeSingle()
+    let book: any = null
+    try {
+      const bookRes = await dbQuery(
+        `SELECT id, title, is_free, is_published, price_cents FROM public.books WHERE id = $1 LIMIT 1;`,
+        [publicationId]
+      )
+      if (bookRes.rows.length > 0) {
+        book = bookRes.rows[0]
+      }
+    } catch {
+      // Fallback to Supabase client if direct DB pool is not configured
+    }
 
-    if (bookError || !book) {
-      return { authorized: false, reason: "Publication does not exist or could not be loaded." }
+    if (!book) {
+      const { data, error: bookError } = await supabase
+        .from("books")
+        .select("id, title, is_free, is_published, price_cents")
+        .eq("id", publicationId)
+        .maybeSingle()
+
+      if (bookError || !data) {
+        return { authorized: false, reason: "Publication does not exist or could not be loaded." }
+      }
+      book = data
     }
 
     // 2. Authoritative Administrator Role Check
@@ -94,17 +111,54 @@ export async function verifyPublicationAccess(
     }
 
     // 7. Authoritative entitlement check in book_entitlements table
-    const { data: entitlement, error: entitlementError } = await supabase
-      .from("book_entitlements")
-      .select("id, is_revoked, expires_at")
-      .eq("user_id", userId)
-      .eq("book_id", publicationId)
-      .eq("is_revoked", false)
-      .maybeSingle()
+    // A) Direct DB query via pool (authoritative superuser query, bypasses anon publishable key RLS limitation)
+    let entitlement: { id: string; is_revoked: boolean; expires_at: string | null } | null = null
+    try {
+      const entRes = await dbQuery(
+        `SELECT id, is_revoked, expires_at 
+         FROM public.book_entitlements 
+         WHERE user_id = $1 AND book_id = $2 AND is_revoked = false 
+         LIMIT 1;`,
+        [userId, publicationId]
+      )
+      if (entRes.rows.length > 0) {
+        entitlement = entRes.rows[0]
+      }
+    } catch (dbErr: any) {
+      console.warn("[verifyPublicationAccess direct DB query note]:", dbErr?.message || dbErr)
+    }
 
-    if (entitlementError) {
-      console.error("[Entitlement Check DB Error]:", entitlementError.message)
-      return { authorized: false, reason: "Failed to verify entitlement license records." }
+    // B) Supabase user session client fallback (reads request cookies if direct DB is down)
+    if (!entitlement) {
+      try {
+        const userClient = await createClient()
+        const { data, error } = await userClient
+          .from("book_entitlements")
+          .select("id, is_revoked, expires_at")
+          .eq("user_id", userId)
+          .eq("book_id", publicationId)
+          .eq("is_revoked", false)
+          .maybeSingle()
+        if (data && !error) {
+          entitlement = data
+        }
+      } catch {}
+    }
+
+    // C) Supabase admin client fallback
+    if (!entitlement) {
+      try {
+        const { data } = await supabase
+          .from("book_entitlements")
+          .select("id, is_revoked, expires_at")
+          .eq("user_id", userId)
+          .eq("book_id", publicationId)
+          .eq("is_revoked", false)
+          .maybeSingle()
+        if (data) {
+          entitlement = data
+        }
+      } catch {}
     }
 
     if (entitlement) {
@@ -117,35 +171,54 @@ export async function verifyPublicationAccess(
 
     // 8. Direct server-side payment verification fallback:
     // Verify an order for this book is marked 'paid' AND payment is 'captured'
-    const { data: orderItem, error: orderError } = await supabase
-      .from("order_items")
-      .select("order_id, orders!inner(id, user_id, status)")
-      .eq("book_id", publicationId)
-      .eq("orders.user_id", userId)
-      .eq("orders.status", "paid")
-      .limit(1)
-      .maybeSingle()
+    let orderVerified = false
+    try {
+      const orderRes = await dbQuery(
+        `SELECT oi.id 
+         FROM public.order_items oi
+         JOIN public.orders o ON o.id = oi.order_id
+         JOIN public.payments p ON p.order_id = o.id
+         WHERE o.user_id = $1 AND oi.book_id = $2 AND o.status = 'paid' AND p.status = 'captured'
+         LIMIT 1;`,
+        [userId, publicationId]
+      )
+      if (orderRes.rows.length > 0) {
+        orderVerified = true
+      }
+    } catch {}
 
-    if (orderError) {
-      console.error("[Order Verification DB Error]:", orderError.message)
-      return { authorized: false, reason: "Failed to verify purchase order records." }
-    }
-
-    if (orderItem) {
-      const orderId = (orderItem.orders as any)?.id
-      if (orderId) {
-        const { data: payment, error: paymentError } = await supabase
-          .from("payments")
-          .select("id, status")
-          .eq("order_id", orderId)
-          .eq("status", "captured")
+    if (!orderVerified) {
+      try {
+        const { data: orderItem } = await supabase
+          .from("order_items")
+          .select("order_id, orders!inner(id, user_id, status)")
+          .eq("book_id", publicationId)
+          .eq("orders.user_id", userId)
+          .eq("orders.status", "paid")
           .limit(1)
           .maybeSingle()
 
-        if (!paymentError && payment) {
-          return { authorized: true, book }
+        if (orderItem) {
+          const orderId = (orderItem.orders as any)?.id
+          if (orderId) {
+            const { data: payment } = await supabase
+              .from("payments")
+              .select("id, status")
+              .eq("order_id", orderId)
+              .eq("status", "captured")
+              .limit(1)
+              .maybeSingle()
+
+            if (payment) {
+              orderVerified = true
+            }
+          }
         }
-      }
+      } catch {}
+    }
+
+    if (orderVerified) {
+      return { authorized: true, book }
     }
 
     // 9. Default Fail-Closed Fallback

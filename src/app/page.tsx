@@ -2,6 +2,7 @@ import Link from "next/link"
 import { Header } from "@/components/layout/header"
 import { Footer } from "@/components/layout/footer"
 import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav"
+import { FaqSection } from "@/components/home/faq-section"
 import { BookCard } from "@/components/books/book-card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -482,37 +483,7 @@ export default async function HomePage() {
         )}
 
         {/* FREQUENTLY ASKED QUESTIONS */}
-        {faqs && faqs.length > 0 && (
-          <section className="py-16 md:py-20 border-b border-black/[0.06]">
-            <div className="max-w-[840px] mx-auto px-4 sm:px-6">
-              <div className="text-center mb-12">
-                <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-neutral-400 block mb-1">
-                  Common Inquiries
-                </span>
-                <h2 className="font-serif text-3xl sm:text-4xl font-bold text-[#111111]">
-                  Frequently Asked Questions
-                </h2>
-              </div>
-
-              <div className="space-y-4">
-                {faqs.map((faq) => (
-                  <div
-                    key={faq.id}
-                    className="rounded-[20px] bg-white border border-black/[0.06] p-6 shadow-sm"
-                  >
-                    <h3 className="font-bold text-sm sm:text-base text-neutral-900 flex items-start gap-3">
-                      <HelpCircle className="w-4 h-4 text-neutral-400 shrink-0 mt-0.5" />
-                      <span>{faq.question}</span>
-                    </h3>
-                    <p className="text-xs sm:text-sm text-neutral-600 mt-2 pl-7 leading-relaxed">
-                      {faq.answer}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        )}
+        <FaqSection faqs={faqs} />
 
         {/* FINAL CALL TO ACTION */}
         <section className="py-20 md:py-28 bg-[#111111] text-white text-center">
@@ -528,12 +499,12 @@ export default async function HomePage() {
             </p>
             <div className="pt-2 flex flex-wrap justify-center gap-3">
               <Link href="/books">
-                <Button size="lg" className="rounded-full bg-white text-black hover:bg-neutral-100 font-bold px-8">
+                <Button size="lg" className="rounded-full bg-white text-black hover:bg-neutral-100 font-bold px-8 shadow-sm">
                   Browse Catalogue
                 </Button>
               </Link>
               <Link href="/free-books">
-                <Button variant="outline" size="lg" className="rounded-full border-white/20 text-white hover:bg-white/10 font-bold px-7">
+                <Button size="lg" className="rounded-full bg-transparent border border-white/40 text-white hover:bg-white/10 hover:text-white font-bold px-7 transition-colors">
                   Explore Free Titles
                 </Button>
               </Link>

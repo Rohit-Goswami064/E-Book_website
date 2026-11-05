@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server"
 import { verifyPublicationAccess } from "@/lib/auth/entitlements"
 import { getR2Client, getR2BucketName, headR2Object } from "@/lib/storage/r2"
 import { GetObjectCommand } from "@aws-sdk/client-s3"
+import { dbQuery } from "@/lib/db"
 import crypto from "crypto"
 
 export const dynamic = "force-dynamic"
@@ -90,16 +91,31 @@ export async function GET(
     if (assets && assets.length > 0) {
       objectKey = assets[0].object_key
     } else {
-      // Fallback to legacy book_files table
-      const { data: file } = await supabase
-        .from("book_files")
-        .select("storage_path")
-        .eq("book_id", bookId)
-        .eq("file_type", "pdf")
-        .maybeSingle()
+      // Fallback to direct DB query if RLS filtered the asset
+      try {
+        const directAsset = await dbQuery(
+          `SELECT object_key FROM public.publication_assets 
+           WHERE publication_id = $1 AND asset_type = 'pdf' AND upload_status = 'completed' 
+           ORDER BY created_at DESC LIMIT 1;`,
+          [bookId]
+        )
+        if (directAsset.rows.length > 0) {
+          objectKey = directAsset.rows[0].object_key
+        }
+      } catch {}
 
-      if (file?.storage_path) {
-        objectKey = file.storage_path
+      if (!objectKey) {
+        // Fallback to legacy book_files table
+        const { data: file } = await supabase
+          .from("book_files")
+          .select("storage_path")
+          .eq("book_id", bookId)
+          .eq("file_type", "pdf")
+          .maybeSingle()
+
+        if (file?.storage_path) {
+          objectKey = file.storage_path
+        }
       }
     }
 

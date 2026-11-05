@@ -68,65 +68,65 @@ export function SettingsForm({
   }
 
   return (
-    <form onSubmit={handleSave} className="rounded-[28px] bg-white border border-black/[0.06] p-6 sm:p-8 space-y-5 shadow-sm">
+    <form onSubmit={handleSave} className="rounded-xl bg-white border border-neutral-200/80 p-4 sm:p-5 space-y-4 shadow-2xs">
       <div>
-        <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-1.5">
+        <label className="block text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">
           Email Address
         </label>
         <div className="relative">
-          <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
           <Input
             value={email}
             disabled
-            className="pl-10 h-11 text-xs bg-neutral-100 cursor-not-allowed text-neutral-500"
+            className="pl-9 h-9 text-xs bg-neutral-100 cursor-not-allowed text-neutral-500 border-neutral-200"
           />
         </div>
         <p className="text-[10px] text-neutral-400 mt-1">Managed via authentication provider</p>
       </div>
 
       <div>
-        <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-1.5">
+        <label className="block text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">
           Full Name
         </label>
         <div className="relative">
-          <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+          <User className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
           <Input
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
             placeholder="Your full name"
-            className="pl-10 h-11 text-xs bg-[#FAFAFA]"
+            className="pl-9 h-9 text-xs bg-white border-neutral-200"
           />
         </div>
       </div>
 
       <div>
-        <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-1.5">
+        <label className="block text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">
           Phone Number
         </label>
         <div className="relative">
-          <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+          <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
           <Input
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             placeholder="+91 98765 43210"
-            className="pl-10 h-11 text-xs bg-[#FAFAFA]"
+            className="pl-9 h-9 text-xs bg-white border-neutral-200"
           />
         </div>
       </div>
 
       <div>
-        <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-1.5">
+        <label className="block text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">
           Short Reader Bio
         </label>
         <Textarea
           value={bio}
           onChange={(e) => setBio(e.target.value)}
           placeholder="A brief note about your literary interests, favorite genres, or background..."
-          className="min-h-[80px] text-xs bg-[#FAFAFA]"
+          className="min-h-[80px] text-xs bg-white border-neutral-200"
         />
       </div>
 
-      <div className="pt-2 flex items-center justify-between border-t border-black/[0.04]">
+      <div className="pt-2 flex items-center justify-between border-t border-neutral-100">
         <div className="flex items-center gap-1.5 text-xs text-neutral-500">
           <Shield className="w-3.5 h-3.5 text-neutral-400" />
           <span>Role: <strong className="text-neutral-800">{role.toUpperCase()}</strong></span>
@@ -135,7 +135,8 @@ export function SettingsForm({
         <Button
           type="submit"
           disabled={saving}
-          className="rounded-full bg-[#111111] text-xs font-bold px-6 shadow-md"
+          size="sm"
+          className="rounded-lg bg-neutral-900 text-white text-xs font-semibold h-8 px-4 hover:bg-neutral-800"
         >
           {saving ? (
             <>

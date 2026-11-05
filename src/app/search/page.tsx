@@ -63,6 +63,22 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
       .limit(6)
 
     categories = cData || []
+
+    // Log search event for store analytics
+    try {
+      await supabase
+        .from("analytics_events")
+        .insert({
+          event_name: "search",
+          user_id: user?.id || null,
+          page_url: `/search?q=${encodeURIComponent(cleanQuery)}`,
+          metadata: {
+            query: cleanQuery,
+            search_term: cleanQuery,
+            results_count: (books?.length || 0) + (authors?.length || 0) + (categories?.length || 0),
+          },
+        })
+    } catch {}
   }
 
   const mapBook = (b: any) => ({

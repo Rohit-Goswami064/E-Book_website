@@ -11,6 +11,7 @@ import {
 import { validateAssetFile, type PublicationAssetType } from "@/lib/storage/validation"
 
 export const dynamic = "force-dynamic"
+export const maxDuration = 300 // Allow up to 5 minutes for large digital asset uploads
 
 /**
  * GET /api/admin/publications/[id]/assets

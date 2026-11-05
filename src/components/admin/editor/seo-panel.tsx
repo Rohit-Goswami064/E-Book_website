@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Image from "next/image"
 import {
   Globe,
   Share2,
@@ -128,8 +129,14 @@ export function SeoPanel({
           /* Google SERP Snippet Box */
           <div className="p-4 bg-white rounded-lg border border-neutral-200/90 font-sans shadow-xs space-y-1.5">
             <div className="text-[12px] text-[#202124] flex items-center gap-1.5 font-sans">
-              <div className="w-5 h-5 rounded-full bg-neutral-900 text-white flex items-center justify-center text-[10px] font-serif font-bold">
-                H
+              <div className="w-5 h-5 rounded-full overflow-hidden relative bg-white border border-neutral-200 shrink-0">
+                <Image
+                  src="/hiddenbook_logo.png"
+                  alt="HiddenBooks"
+                  width={20}
+                  height={20}
+                  className="w-full h-full object-cover"
+                />
               </div>
               <div className="flex flex-col">
                 <span className="text-[11px] font-medium leading-none text-neutral-800">HiddenBooks Publishing</span>

@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname, useRouter } from "next/navigation"
 import {
   BookOpen,
@@ -69,8 +70,17 @@ export function Header({ user: initialUser, isAdmin = false }: HeaderProps) {
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (searchQuery.trim()) {
+      const q = searchQuery.trim()
       setIsSearchOpen(false)
-      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`)
+      fetch("/api/analytics/track", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event_name: "search",
+          metadata: { query: q, search_term: q },
+        }),
+      }).catch(() => {})
+      router.push(`/search?q=${encodeURIComponent(q)}`)
     }
   }
 
@@ -96,17 +106,16 @@ export function Header({ user: initialUser, isAdmin = false }: HeaderProps) {
         <div className="max-w-[1360px] mx-auto px-3 sm:px-6 h-[64px] sm:h-[72px] flex items-center justify-between gap-2 sm:gap-4">
           {/* Brand Logo */}
           <div className="flex items-center gap-4 lg:gap-8 min-w-0">
-            <Link href="/" className="flex items-center gap-2 sm:gap-2.5 group shrink-0">
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#111111] text-white flex items-center justify-center font-serif text-base sm:text-lg font-bold shadow-sm transition-transform group-hover:scale-105 shrink-0">
-                H
-              </div>
-              <div>
-                <span className="font-serif text-xl sm:text-2xl font-bold tracking-tight text-[#111111] block leading-none">
-                  HiddenBooks
-                </span>
-                <span className="text-[9px] sm:text-[10px] tracking-[0.14em] sm:tracking-[0.16em] uppercase text-neutral-500 font-semibold block mt-0.5">
-                  Curated Editions
-                </span>
+            <Link href="/" className="flex items-center group shrink-0" aria-label="HiddenBooks Home">
+              <div className="relative h-12 w-12 sm:h-14 sm:w-14 transition-transform group-hover:scale-105 shrink-0">
+                <Image
+                  src="/hiddenbook_logo.png"
+                  alt="HiddenBooks"
+                  width={56}
+                  height={56}
+                  className="w-full h-full object-contain"
+                  priority
+                />
               </div>
             </Link>
 

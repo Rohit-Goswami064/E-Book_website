@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import Image from "next/image"
 import { Send, ShieldCheck, MessageCircle, Heart } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -42,13 +43,16 @@ export function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-10 lg:gap-8 pb-12 border-b border-black/[0.08]">
           {/* Brand & Editorial Mission */}
           <div className="lg:col-span-2 space-y-4">
-            <Link href="/" className="inline-flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-full bg-[#111111] text-white flex items-center justify-center font-serif text-lg font-bold">
-                H
+            <Link href="/" className="inline-block group" aria-label="HiddenBooks Home">
+              <div className="relative w-16 h-16 sm:w-20 sm:h-20 transition-transform group-hover:scale-105 shrink-0">
+                <Image
+                  src="/hiddenbook_logo.png"
+                  alt="HiddenBooks"
+                  width={80}
+                  height={80}
+                  className="w-full h-full object-contain"
+                />
               </div>
-              <span className="font-serif text-2xl font-bold tracking-tight text-[#111111]">
-                HiddenBooks
-              </span>
             </Link>
             <p className="text-sm text-neutral-600 leading-relaxed max-w-sm">
               A premium digital destination for discovering, purchasing, and reading valuable books. Unhurried typography, verified translations, and distraction-free digital reading.

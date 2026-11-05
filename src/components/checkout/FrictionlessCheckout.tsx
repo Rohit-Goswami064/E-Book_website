@@ -4,7 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Loader2, Mail, Lock, ShieldCheck, ArrowRight, BookOpen } from "lucide-react"
+import { Loader2, Mail, Lock, ShieldCheck, ArrowRight, BookOpen, Tag, X } from "lucide-react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { formatCurrency } from "@/lib/utils"
@@ -89,6 +89,60 @@ export function FrictionlessCheckout({
   const [loadingStage, setLoadingStage] = React.useState<CheckoutStage>("idle")
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
 
+  // Coupon state
+  const [couponInput, setCouponInput] = React.useState("")
+  const [appliedCoupon, setAppliedCoupon] = React.useState<{
+    code: string
+    discountCents: number
+    finalPriceCents: number
+    savingsFormatted: string
+  } | null>(null)
+  const [validatingCoupon, setValidatingCoupon] = React.useState(false)
+  const [couponError, setCouponError] = React.useState<string | null>(null)
+
+  const handleApplyCoupon = async () => {
+    if (!couponInput.trim()) return
+    setValidatingCoupon(true)
+    setCouponError(null)
+
+    try {
+      const res = await fetch("/api/coupons/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: couponInput.trim().toUpperCase(),
+          bookId,
+        }),
+      })
+
+      const data = await res.json()
+      if (res.ok && data.valid) {
+        setAppliedCoupon({
+          code: data.code,
+          discountCents: data.discountCents,
+          finalPriceCents: data.finalPriceCents,
+          savingsFormatted: data.savingsFormatted,
+        })
+        setCouponInput("")
+        toast.success(data.message || `Coupon "${data.code}" applied!`)
+      } else {
+        setCouponError(data.error || "Invalid coupon code.")
+        toast.error(data.error || "Invalid coupon code.")
+      }
+    } catch {
+      setCouponError("Could not validate coupon. Please try again.")
+    } finally {
+      setValidatingCoupon(false)
+    }
+  }
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null)
+    setCouponInput("")
+    setCouponError(null)
+    toast.info("Coupon removed.")
+  }
+
   const isLoading = loadingStage !== "idle"
 
   // Pre-load Razorpay SDK script on component mount
@@ -108,12 +162,13 @@ export function FrictionlessCheckout({
   }, [initialEmail])
 
   // Price formatting helper
+  const effectivePrice = appliedCoupon ? appliedCoupon.finalPriceCents : price
   const displayPrice = React.useMemo(() => {
-    if (price === 0) return "Free"
-    // Handle either rupees (249) or paise (24900)
-    const amountInPaise = price < 1000 && Number.isInteger(price) ? price * 100 : price
+    if (effectivePrice === 0) return "Free"
+    const amountInPaise = effectivePrice < 1000 && Number.isInteger(effectivePrice) ? effectivePrice * 100 : effectivePrice
     return formatCurrency(amountInPaise, currency)
-  }, [price, currency])
+  }, [effectivePrice, currency])
+
 
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -137,6 +192,7 @@ export function FrictionlessCheckout({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           bookId,
+          couponCode: appliedCoupon?.code || null,
           guestDetails: {
             email: cleanEmail,
           },
@@ -346,6 +402,59 @@ export function FrictionlessCheckout({
             <p className="text-xs text-rose-500 font-medium mt-1">{errorMessage}</p>
           )}
         </div>
+
+        {/* Coupon Code Section */}
+        {price > 0 && (
+          <div className="space-y-1.5 text-left">
+            {appliedCoupon ? (
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-900 dark:text-emerald-300">
+                <div className="flex items-center gap-2">
+                  <Tag className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span className="font-bold font-mono uppercase">{appliedCoupon.code}</span>
+                  <span className="text-[11px] text-emerald-700 dark:text-emerald-400">applied (-{appliedCoupon.savingsFormatted})</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRemoveCoupon}
+                  className="text-xs font-semibold text-rose-600 hover:text-rose-800 dark:text-rose-400 transition cursor-pointer"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
+                    <Input
+                      type="text"
+                      disabled={isLoading}
+                      value={couponInput}
+                      onChange={(e) => {
+                        setCouponInput(e.target.value.toUpperCase())
+                        if (couponError) setCouponError(null)
+                      }}
+                      placeholder="Coupon Code (e.g. WELCOME10)"
+                      className="pl-9 h-10 rounded-xl bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-xs uppercase font-mono"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={() => handleApplyCoupon()}
+                    disabled={isLoading || validatingCoupon || !couponInput.trim()}
+                    size="sm"
+                    className="h-10 px-3.5 rounded-xl text-xs font-bold bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900"
+                  >
+                    {validatingCoupon ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Apply"}
+                  </Button>
+                </div>
+                {couponError && (
+                  <p className="text-[11px] text-rose-500 font-medium pl-1 mt-1">{couponError}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <Button
           type="submit"

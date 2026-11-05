@@ -607,6 +607,58 @@ export function CheckoutButton({
               )}
             </div>
 
+            {/* Coupon Code Section inside Modal */}
+            {!isFree && priceCents > 0 && (
+              <div className="space-y-1.5 pt-1">
+                {appliedCoupon ? (
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
+                    <div className="flex items-center gap-2">
+                      <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="font-bold font-mono uppercase">{appliedCoupon.code}</span>
+                      <span className="text-[11px] text-emerald-700">applied (-{appliedCoupon.savingsFormatted})</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRemoveCoupon}
+                      className="text-xs font-semibold text-rose-600 hover:text-rose-800 transition"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
+                        <Input
+                          type="text"
+                          value={couponInput}
+                          onChange={(e) => {
+                            setCouponInput(e.target.value.toUpperCase())
+                            if (couponError) setCouponError(null)
+                          }}
+                          placeholder="Coupon Code (e.g. WELCOME10)"
+                          className="pl-9 h-10 rounded-xl bg-white border-black/15 text-xs uppercase font-mono"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        onClick={() => handleApplyCoupon()}
+                        disabled={validatingCoupon || !couponInput.trim()}
+                        size="sm"
+                        className="h-10 px-3.5 rounded-xl text-xs font-bold bg-neutral-900 text-white hover:bg-neutral-800"
+                      >
+                        {validatingCoupon ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Apply"}
+                      </Button>
+                    </div>
+                    {couponError && (
+                      <p className="text-[11px] text-rose-600 font-medium pl-1 mt-1">{couponError}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Order Price Summary Box */}
             <div className="p-3.5 rounded-xl bg-neutral-100/80 border border-black/5 flex items-center justify-between text-xs">
               <div>

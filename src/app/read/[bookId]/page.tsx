@@ -3,6 +3,7 @@ import { redirect } from "next/navigation"
 import { getCurrentUser, isCurrentUserAdmin, checkBookEntitlement } from "@/lib/auth/roles"
 import { createClient } from "@/lib/supabase/server"
 import { EBookReader } from "@/components/reader/ebook-reader"
+import { AudiobookPlayer } from "@/components/reader/audiobook-player"
 import { ShieldAlert, ArrowLeft, ShoppingBag } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -28,7 +29,7 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
   // Fetch book details
   const { data: book } = await supabase
     .from("books")
-    .select("id, title, subtitle, slug, format, pages, is_free, price_cents, language, table_of_contents, authors(name)")
+    .select("id, title, subtitle, slug, format, pages, is_free, price_cents, language, table_of_contents, cover_image_url, audio_duration, authors(name)")
     .eq("id", bookId)
     .maybeSingle()
 
@@ -124,6 +125,27 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
 
   const userProgress = progress as { current_page?: number; progress_percentage?: number } | null
   const userBookmarks = (bookmarks as any[]) || []
+
+  const isAudiobook =
+    book.format?.toLowerCase() === "audiobook" ||
+    (!pdfAsset && (assets || []).some((a: any) => a.asset_type === "audio" || a.asset_type === "audio_chapter"))
+
+  if (isAudiobook) {
+    return (
+      <AudiobookPlayer
+        book={{
+          id: book.id,
+          title: book.title,
+          subtitle: book.subtitle,
+          author: (book.authors as any)?.name || "HiddenBooks Editorial",
+          coverUrl: book.cover_image_url,
+          duration: book.audio_duration,
+          tableOfContents: Array.isArray(book.table_of_contents) ? book.table_of_contents : [],
+        }}
+        initialProgress={userProgress?.progress_percentage || 0}
+      />
+    )
+  }
 
   return (
     <EBookReader

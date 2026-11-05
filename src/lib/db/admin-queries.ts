@@ -98,6 +98,57 @@ export interface AdminOverviewStats {
     created_at: string
   }[]
   topBooks: TopPerformingBook[]
+  retention: {
+    repeatBuyers: number
+    totalBuyers: number
+    retentionRatePercent: number
+  }
+  monthlyRevenue: {
+    month: string
+    revenueCents: number
+    ordersCount: number
+  }[]
+  salesByCategory: {
+    categoryId: string
+    categoryName: string
+    colorCode: string
+    unitsSold: number
+    grossSalesCents: number
+    sharePercent: number
+  }[]
+  formatBreakdown: {
+    format: string
+    unitsSold: number
+    grossCents: number
+    percentage: number
+  }[]
+  reviewsSummary: {
+    avgRating: number
+    totalReviews: number
+    starCounts: {
+      star5: number
+      star4: number
+      star3: number
+      star2: number
+      star1: number
+    }
+    latestReview?: {
+      id: string
+      rating: number
+      title: string | null
+      reviewText: string
+      authorName: string
+      createdAt: string
+    } | null
+  }
+  storeTraffic: {
+    totalEvents: number
+    eventBreakdown: {
+      eventName: string
+      count: number
+      percentage: number
+    }[]
+  }
 }
 
 /**
@@ -300,6 +351,228 @@ export async function getAdminOverviewMetrics(): Promise<AdminOverviewStats> {
     net_sales_cents: Number(r.net_sales_cents || 0),
   }))
 
+  // 9. Repeat Customer Retention (Real DB Cohort)
+  let retention = { repeatBuyers: 0, totalBuyers: 0, retentionRatePercent: 0 }
+  try {
+    const repRes = await dbQuery<{ repeat_buyers: string; total_buyers: string }>(`
+      SELECT 
+        (SELECT COUNT(DISTINCT user_id)::text FROM (
+          SELECT user_id FROM public.orders WHERE status = 'paid' GROUP BY user_id HAVING COUNT(*) > 1
+        ) rep) as repeat_buyers,
+        (SELECT COUNT(DISTINCT user_id)::text FROM public.orders WHERE status = 'paid') as total_buyers;
+    `)
+    const repeatBuyers = Number(repRes.rows[0]?.repeat_buyers || 0)
+    const totalBuyers = Number(repRes.rows[0]?.total_buyers || 0)
+    const retentionRatePercent = totalBuyers > 0 ? (repeatBuyers / totalBuyers) * 100 : 0
+    retention = { repeatBuyers, totalBuyers, retentionRatePercent }
+  } catch (err) {
+    console.warn("[Admin Retention Metrics Warning]:", err)
+  }
+
+  // 10. Last 6 Months Revenue Trend (Real captured payments)
+  let monthlyRevenue: { month: string; revenueCents: number; ordersCount: number }[] = []
+  try {
+    const mRes = await dbQuery<{ month: string; revenue_cents: string; orders_count: string }>(`
+      SELECT 
+        to_char(date_trunc('month', created_at), 'Mon') as month,
+        COALESCE(SUM(amount_cents), 0)::text as revenue_cents,
+        COUNT(*)::text as orders_count
+      FROM public.payments
+      WHERE status = 'captured' AND created_at >= NOW() - INTERVAL '6 months'
+      GROUP BY date_trunc('month', created_at), to_char(date_trunc('month', created_at), 'Mon')
+      ORDER BY date_trunc('month', created_at) ASC;
+    `)
+    monthlyRevenue = mRes.rows.map((r) => ({
+      month: r.month,
+      revenueCents: Number(r.revenue_cents || 0),
+      ordersCount: Number(r.orders_count || 0),
+    }))
+  } catch (err) {
+    console.warn("[Admin Monthly Revenue Warning]:", err)
+  }
+
+  // 11. Real Sales by Category
+  let salesByCategory: {
+    categoryId: string
+    categoryName: string
+    colorCode: string
+    unitsSold: number
+    grossSalesCents: number
+    sharePercent: number
+  }[] = []
+  try {
+    const catRes = await dbQuery<{
+      id: string
+      name: string
+      color_code: string
+      units_sold: string
+      gross_cents: string
+    }>(`
+      SELECT 
+        c.id,
+        c.name,
+        COALESCE(c.color_code, '#E8E0D6') as color_code,
+        COUNT(oi.id)::text as units_sold,
+        COALESCE(SUM(oi.price_cents), 0)::text as gross_cents
+      FROM public.categories c
+      LEFT JOIN public.book_categories bc ON bc.category_id = c.id
+      LEFT JOIN public.order_items oi ON oi.book_id = bc.book_id
+      LEFT JOIN public.orders o ON o.id = oi.order_id AND o.status = 'paid'
+      WHERE c.is_published = true
+      GROUP BY c.id, c.name, c.color_code
+      ORDER BY COUNT(oi.id) DESC, SUM(oi.price_cents) DESC NULLS LAST
+      LIMIT 6;
+    `)
+    const totalUnits = catRes.rows.reduce((sum, r) => sum + Number(r.units_sold || 0), 0)
+    salesByCategory = catRes.rows.map((r) => {
+      const units = Number(r.units_sold || 0)
+      return {
+        categoryId: r.id,
+        categoryName: r.name,
+        colorCode: r.color_code,
+        unitsSold: units,
+        grossSalesCents: Number(r.gross_cents || 0),
+        sharePercent: totalUnits > 0 ? Math.round((units / totalUnits) * 100) : 0,
+      }
+    })
+  } catch (err) {
+    console.warn("[Admin Categories Sales Warning]:", err)
+  }
+
+  // 12. Real Format Breakdown (PDF vs Audiobook vs EPUB)
+  let formatBreakdown: { format: string; unitsSold: number; grossCents: number; percentage: number }[] = []
+  try {
+    const fmtRes = await dbQuery<{ format: string; units: string; gross: string }>(`
+      SELECT 
+        COALESCE(b.format, 'PDF') as format,
+        COUNT(oi.id)::text as units,
+        COALESCE(SUM(oi.price_cents), 0)::text as gross
+      FROM public.order_items oi
+      JOIN public.orders o ON o.id = oi.order_id AND o.status = 'paid'
+      JOIN public.books b ON b.id = oi.book_id
+      GROUP BY b.format;
+    `)
+    const fmtTotal = fmtRes.rows.reduce((acc, r) => acc + Number(r.units || 0), 0)
+    formatBreakdown = fmtRes.rows.map((r) => {
+      const u = Number(r.units || 0)
+      return {
+        format: r.format,
+        unitsSold: u,
+        grossCents: Number(r.gross || 0),
+        percentage: fmtTotal > 0 ? Math.round((u / fmtTotal) * 100) : 0,
+      }
+    })
+  } catch (err) {
+    console.warn("[Admin Format Breakdown Warning]:", err)
+  }
+
+  // 13. Customer Reviews Aggregation & Latest Review
+  let reviewsSummary = {
+    avgRating: 0,
+    totalReviews: 0,
+    starCounts: { star5: 0, star4: 0, star3: 0, star2: 0, star1: 0 },
+    latestReview: null as {
+      id: string
+      rating: number
+      title: string | null
+      reviewText: string
+      authorName: string
+      createdAt: string
+    } | null,
+  }
+  try {
+    const revRes = await dbQuery<{
+      avg_rating: string
+      total_reviews: string
+      s5: string
+      s4: string
+      s3: string
+      s2: string
+      s1: string
+    }>(`
+      SELECT 
+        COALESCE(AVG(rating), 0)::text as avg_rating,
+        COUNT(*)::text as total_reviews,
+        COUNT(CASE WHEN rating = 5 THEN 1 END)::text as s5,
+        COUNT(CASE WHEN rating = 4 THEN 1 END)::text as s4,
+        COUNT(CASE WHEN rating = 3 THEN 1 END)::text as s3,
+        COUNT(CASE WHEN rating = 2 THEN 1 END)::text as s2,
+        COUNT(CASE WHEN rating = 1 THEN 1 END)::text as s1
+      FROM public.reviews
+      WHERE is_approved = true;
+    `)
+    const rRow = revRes.rows[0]
+    if (rRow) {
+      reviewsSummary.avgRating = Number(Number(rRow.avg_rating || 0).toFixed(1))
+      reviewsSummary.totalReviews = Number(rRow.total_reviews || 0)
+      reviewsSummary.starCounts = {
+        star5: Number(rRow.s5 || 0),
+        star4: Number(rRow.s4 || 0),
+        star3: Number(rRow.s3 || 0),
+        star2: Number(rRow.s2 || 0),
+        star1: Number(rRow.s1 || 0),
+      }
+    }
+
+    const latestRevRes = await dbQuery<{
+      id: string
+      rating: number
+      title: string | null
+      review_text: string
+      created_at: string
+      author_name: string | null
+    }>(`
+      SELECT r.id, r.rating, r.title, r.review_text, r.created_at, p.full_name as author_name
+      FROM public.reviews r
+      LEFT JOIN public.profiles p ON p.id = r.user_id
+      WHERE r.is_approved = true
+      ORDER BY r.created_at DESC
+      LIMIT 1;
+    `)
+    if (latestRevRes.rows[0]) {
+      const lr = latestRevRes.rows[0]
+      reviewsSummary.latestReview = {
+        id: lr.id,
+        rating: lr.rating,
+        title: lr.title,
+        reviewText: lr.review_text,
+        authorName: lr.author_name || "Verified Reader",
+        createdAt: lr.created_at,
+      }
+    }
+  } catch (err) {
+    console.warn("[Admin Reviews Summary Warning]:", err)
+  }
+
+  // 14. Real Store Traffic from analytics_events
+  let storeTraffic = {
+    totalEvents: 0,
+    eventBreakdown: [] as { eventName: string; count: number; percentage: number }[],
+  }
+  try {
+    const trafRes = await dbQuery<{ event_name: string; count: string }>(`
+      SELECT event_name, COUNT(*)::text as count
+      FROM public.analytics_events
+      GROUP BY event_name
+      ORDER BY COUNT(*) DESC
+      LIMIT 5;
+    `)
+    const totalEvents = trafRes.rows.reduce((acc, r) => acc + Number(r.count || 0), 0)
+    storeTraffic = {
+      totalEvents,
+      eventBreakdown: trafRes.rows.map((r) => {
+        const c = Number(r.count || 0)
+        return {
+          eventName: r.event_name,
+          count: c,
+          percentage: totalEvents > 0 ? Math.round((c / totalEvents) * 100) : 0,
+        }
+      }),
+    }
+  } catch (err) {
+    console.warn("[Admin Traffic Metrics Warning]:", err)
+  }
+
   return {
     grossSalesCents,
     refundTotalsCents,
@@ -311,6 +584,12 @@ export async function getAdminOverviewMetrics(): Promise<AdminOverviewStats> {
     recentOrders,
     recentUsers,
     topBooks,
+    retention,
+    monthlyRevenue,
+    salesByCategory,
+    formatBreakdown,
+    reviewsSummary,
+    storeTraffic,
   }
 }
 
@@ -590,8 +869,13 @@ export async function getAdminAnalyticsMetrics(range: string = "30d") {
   const revenueCents = Number(paidOrdersRes.rows[0]?.total || 0)
 
   // 2. Real events from analytics_events
-  const eventsRes = await dbQuery(`
-    SELECT event_name, entity_id, properties, session_id
+  const eventsRes = await dbQuery<{
+    event_name: string
+    book_id: string | null
+    metadata: any
+    session_id: string | null
+  }>(`
+    SELECT event_name, book_id, metadata, session_id
     FROM public.analytics_events
     WHERE created_at >= $1;
   `, [startDate.toISOString()])
@@ -610,15 +894,24 @@ export async function getAdminAnalyticsMetrics(range: string = "30d") {
     if (evt.event_name === "page_view") totalPageViews++
     if (evt.event_name === "book_view") {
       bookViews++
-      if (evt.entity_id) {
-        bookViewCounts[evt.entity_id] = (bookViewCounts[evt.entity_id] || 0) + 1
+      const bId =
+        evt.book_id ||
+        (evt.metadata && typeof evt.metadata === "object"
+          ? evt.metadata.book_id || evt.metadata.entity_id
+          : null)
+      if (bId) {
+        bookViewCounts[bId] = (bookViewCounts[bId] || 0) + 1
       }
     }
     if (evt.event_name === "checkout_initiated") checkoutsInitiated++
     if (evt.event_name === "reader_opened") readerSessions++
     if (evt.event_name === "add_to_wishlist") wishlistAdds++
-    if (evt.event_name === "search" && evt.properties?.query) {
-      const q = String(evt.properties.query).trim().toLowerCase()
+    const query =
+      evt.metadata && typeof evt.metadata === "object"
+        ? evt.metadata.query || evt.metadata.q
+        : null
+    if (evt.event_name === "search" && query) {
+      const q = String(query).trim().toLowerCase()
       if (q) searchQueries[q] = (searchQueries[q] || 0) + 1
     }
   }

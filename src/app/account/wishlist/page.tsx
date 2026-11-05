@@ -1,8 +1,5 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
-import { Header } from "@/components/layout/header"
-import { Footer } from "@/components/layout/footer"
-import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav"
 import { BookCard } from "@/components/books/book-card"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/server"
@@ -55,54 +52,38 @@ export default async function WishlistPage() {
   })
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F6F5F2]">
-      <Header
-        user={{ id: user.id, email: user.email, name: user.user_metadata?.full_name }}
-        isAdmin={isAdmin}
-      />
+    <div className="space-y-4 sm:space-y-5">
+      <div className="border-b border-neutral-200/80 pb-3.5">
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-neutral-900">
+          Saved for Later
+        </h1>
+        <p className="text-xs text-neutral-500 mt-0.5">
+          {books.length} publications saved to your reading wishlist.
+        </p>
+      </div>
 
-      <main className="flex-1 max-w-[1080px] w-full mx-auto px-4 sm:px-6 py-8 md:py-12 space-y-6">
-        <nav className="flex items-center gap-2 text-xs text-neutral-500 mb-2">
-          <Link href="/account" className="hover:text-black">Account</Link>
-          <ChevronRight className="w-3.5 h-3.5" />
-          <span className="text-neutral-900 font-semibold">Saved Wishlist</span>
-        </nav>
-
-        <div className="border-b border-black/[0.06] pb-4">
-          <h1 className="font-serif text-3xl font-bold text-neutral-900">
-            Saved for Later
-          </h1>
-          <p className="text-xs text-neutral-500 mt-1">
-            {books.length} publications saved to your reading wishlist.
-          </p>
+      {books.length > 0 ? (
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+          {books.map((book) => (
+            <BookCard key={book.id} book={mapBook(book)} initialWishlisted={true} />
+          ))}
         </div>
-
-        {books.length > 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
-            {books.map((book) => (
-              <BookCard key={book.id} book={mapBook(book)} initialWishlisted={true} />
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-[28px] bg-white border border-black/10 p-12 text-center max-w-md mx-auto">
-            <Bookmark className="w-12 h-12 text-neutral-300 mx-auto mb-3" />
-            <h3 className="font-serif text-xl font-bold text-neutral-800">
-              Your Wishlist is Empty
-            </h3>
-            <p className="text-xs text-neutral-500 mt-2">
-              Save books as you browse our catalogue to easily find them when you&apos;re ready to read.
-            </p>
-            <Link href="/books" className="inline-block mt-4">
-              <Button size="sm" className="rounded-full bg-[#111111]">
-                Explore Catalogue
-              </Button>
-            </Link>
-          </div>
-        )}
-      </main>
-
-      <Footer />
-      <MobileBottomNav />
+      ) : (
+        <div className="rounded-xl bg-white border border-neutral-200/80 p-10 text-center max-w-md mx-auto shadow-2xs">
+          <Bookmark className="w-10 h-10 text-neutral-300 mx-auto mb-3" />
+          <h3 className="text-base font-bold text-neutral-800">
+            Your Wishlist is Empty
+          </h3>
+          <p className="text-xs text-neutral-500 mt-1">
+            Save books as you browse our catalogue to easily find them when you&apos;re ready to read.
+          </p>
+          <Link href="/books" className="inline-block mt-4">
+            <Button size="sm" className="rounded-lg text-xs font-semibold h-8 px-3.5 bg-neutral-900 text-white hover:bg-neutral-800">
+              Explore Catalogue
+            </Button>
+          </Link>
+        </div>
+      )}
     </div>
   )
 }

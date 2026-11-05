@@ -21,7 +21,7 @@ export default async function AdminBooksListPage() {
       {/* Compact Header (20% space budget pattern) */}
       <div className="flex items-center justify-between shrink-0">
         <div>
-          <h1 className="text-xl font-bold font-serif text-neutral-900 leading-tight">
+          <h1 className="text-xl font-bold tracking-tight text-neutral-900 leading-tight">
             Book Catalogue
           </h1>
           <p className="text-xs text-neutral-500">
@@ -30,7 +30,7 @@ export default async function AdminBooksListPage() {
         </div>
 
         <Link href="/super-admin/books/new">
-          <button className="h-9 px-4 rounded-full bg-[#111111] text-white text-xs font-bold hover:bg-neutral-800 transition flex items-center gap-1.5 shadow-sm">
+          <button className="h-9 px-4 rounded-lg bg-neutral-900 text-white text-xs font-semibold hover:bg-neutral-800 transition flex items-center gap-1.5 shadow-xs">
             <Plus className="w-3.5 h-3.5" />
             <span>Add New Book</span>
           </button>
@@ -38,7 +38,7 @@ export default async function AdminBooksListPage() {
       </div>
 
       {/* Main Table Area (80% space budget pattern) */}
-      <div className="rounded-[20px] border border-black/[0.08] bg-white flex-1 overflow-auto shadow-sm">
+      <div className="rounded-xl border border-neutral-200/80 bg-white flex-1 overflow-auto shadow-xs">
         <Table>
           <TableHeader>
             <TableRow>
@@ -65,7 +65,7 @@ export default async function AdminBooksListPage() {
                   </TableCell>
                   <TableCell>
                     {b.is_free ? (
-                      <span className="text-[10px] font-bold text-[#1B5E20] bg-[#E8F5E9] px-2 py-0.5 rounded-full border border-[#C8E6C9]">
+                      <span className="text-[10px] font-bold text-[#1B5E20] bg-[#E8F5E9] px-2 py-0.5 rounded-md border border-[#C8E6C9]">
                         Free
                       </span>
                     ) : (

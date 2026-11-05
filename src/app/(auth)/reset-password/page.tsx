@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -49,7 +50,22 @@ export default function ResetPasswordPage() {
 
   return (
     <div className="min-h-screen bg-[#F6F5F2] flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md px-4">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md px-4 text-center">
+        <Link href="/" className="inline-flex items-center gap-2.5 mb-6">
+          <div className="size-8 rounded-lg overflow-hidden shadow-sm relative bg-white border border-border shrink-0">
+            <Image
+              src="/hiddenbook_logo.png"
+              alt="HiddenBooks Logo"
+              width={32}
+              height={32}
+              className="w-full h-full object-cover"
+              priority
+            />
+          </div>
+          <span className="font-serif text-xl font-bold tracking-tight text-foreground">
+            Hidden<span className="italic font-normal">Books</span>
+          </span>
+        </Link>
         <h2 className="font-serif text-3xl font-bold tracking-tight text-[#111111]">
           Set New Password
         </h2>

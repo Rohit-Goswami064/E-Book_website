@@ -3,13 +3,14 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { slugify } from "@/lib/utils"
 import { toast } from "sonner"
-import { Loader2, Save, ArrowLeft, Eye, Sparkles } from "lucide-react"
+import { Loader2, Save, ArrowLeft } from "lucide-react"
 import Link from "next/link"
-import { PublicationAssetManager } from "@/components/admin/publication-asset-manager"
+import {
+  PublicationAssetManager,
+  type PublicationAssetManagerRef,
+} from "@/components/admin/publication-asset-manager"
 import { CloudinaryUpload } from "@/components/admin/cloudinary-upload"
 
 interface BookFormProps {
@@ -26,6 +27,7 @@ export function BookForm({
   selectedCategoryIds = [],
 }: BookFormProps) {
   const router = useRouter()
+  const assetManagerRef = React.useRef<PublicationAssetManagerRef>(null)
   const isEditing = !!initialData?.id
 
   const [title, setTitle] = React.useState(initialData?.title || "")
@@ -128,12 +130,34 @@ export function BookForm({
 
       const data = await res.json()
       if (res.ok) {
-        toast.success(effectivePublicationId ? "Book updated successfully." : "Book created successfully.")
+        const bookId = effectivePublicationId || data.book?.id
+
         if (!effectivePublicationId && data.book?.id) {
           setSavedPublicationId(data.book.id)
           window.history.replaceState(null, "", `/super-admin/books/${data.book.id}/edit`)
-          toast.success("Publication ID created. You can now upload Cloudflare R2 assets below!")
+        }
+
+        // If there are files staged in the asset manager before publish, upload them now
+        let uploadFailed = false
+        if (assetManagerRef.current?.hasPendingFiles() && bookId) {
+          toast.loading("Uploading attached book assets to Cloudflare R2...", { id: "asset-upload" })
+          try {
+            const uploadSuccess = await assetManagerRef.current.uploadPendingFiles(bookId)
+            if (uploadSuccess) {
+              toast.success("Book and digital assets published successfully!", { id: "asset-upload" })
+            } else {
+              uploadFailed = true
+              toast.error("Book saved, but some assets failed to upload. Check assets below.", { id: "asset-upload" })
+            }
+          } catch {
+            uploadFailed = true
+            toast.error("Error during asset upload. Check assets below.", { id: "asset-upload" })
+          }
         } else {
+          toast.success(effectivePublicationId ? "Book updated successfully." : "Book created successfully.")
+        }
+
+        if (!uploadFailed) {
           router.push("/super-admin/books")
           router.refresh()
         }
@@ -148,75 +172,79 @@ export function BookForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-8 max-w-4xl mx-auto overflow-y-auto">
+    <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-6 w-full max-w-[1400px]">
       {/* Header Bar */}
-      <div className="flex items-center justify-between border-b border-black/[0.06] pb-4">
+      <div className="flex items-center justify-between border-b border-neutral-200/80 pb-4">
         <div className="flex items-center gap-3">
           <Link
             href="/super-admin/books"
-            className="w-8 h-8 rounded-full border border-black/10 flex items-center justify-center hover:bg-neutral-100 transition"
+            className="w-8 h-8 rounded-lg border border-neutral-200 bg-white hover:bg-neutral-100 flex items-center justify-center text-neutral-600 hover:text-neutral-900 shadow-xs transition"
           >
             <ArrowLeft className="w-4 h-4" />
           </Link>
           <div>
-            <h1 className="font-serif text-2xl font-bold text-neutral-900">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-neutral-900">
               {isEditing ? `Edit: ${initialData.title}` : "Create New Publication"}
             </h1>
-            <p className="text-xs text-neutral-500">
+            <p className="text-xs text-neutral-500 mt-0.5">
               Configure publication details, pricing, categories, and SEO fields.
             </p>
           </div>
         </div>
 
-        <Button type="submit" disabled={saving} className="rounded-full bg-[#111111] text-xs font-bold px-6 gap-2">
+        <Button
+          type="submit"
+          disabled={saving}
+          className="h-9 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-semibold px-4 shadow-xs gap-2"
+        >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           <span>{isEditing ? "Update Book" : "Publish Book"}</span>
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Primary Details */}
-        <div className="md:col-span-2 space-y-6">
-          <div className="rounded-[24px] bg-white border border-black/[0.06] p-6 space-y-4 shadow-sm">
-            <h3 className="font-bold text-sm text-neutral-900 pb-2 border-b border-black/[0.04]">
+        <div className="lg:col-span-2 space-y-6">
+          <div className="rounded-xl bg-white border border-neutral-200/80 p-5 space-y-4 shadow-xs">
+            <h3 className="font-semibold text-sm text-neutral-900 pb-3 border-b border-neutral-100">
               Basic Information
             </h3>
 
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500 mb-1">
+              <label className="block text-xs font-medium text-neutral-700 mb-1.5">
                 Book Title *
               </label>
-              <Input
+              <input
                 value={title}
                 onChange={(e) => handleTitleChange(e.target.value)}
                 required
                 placeholder="e.g. गोदान (Godaan) or The Mindset"
-                className="h-11 text-xs"
+                className="w-full h-9 rounded-lg border border-neutral-200 bg-white px-3 text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500 mb-1">
+                <label className="block text-xs font-medium text-neutral-700 mb-1.5">
                   URL Slug *
                 </label>
-                <Input
+                <input
                   value={slug}
                   onChange={(e) => setSlug(e.target.value)}
                   required
                   placeholder="godaan-edition"
-                  className="h-11 text-xs font-mono"
+                  className="w-full h-9 rounded-lg border border-neutral-200 bg-white px-3 text-xs font-mono text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500 mb-1">
+                <label className="block text-xs font-medium text-neutral-700 mb-1.5">
                   Author
                 </label>
                 <select
                   value={authorId}
                   onChange={(e) => setAuthorId(e.target.value)}
-                  className="w-full h-11 rounded-full border border-black/10 bg-[#FAFAFA] px-4 text-xs font-medium focus:outline-none"
+                  className="w-full h-9 rounded-lg border border-neutral-200 bg-white px-3 text-xs font-medium text-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
                 >
                   <option value="">Select Author...</option>
                   {authors.map((a) => (
@@ -229,57 +257,59 @@ export function BookForm({
             </div>
 
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500 mb-1">
+              <label className="block text-xs font-medium text-neutral-700 mb-1.5">
                 Subtitle
               </label>
-              <Input
+              <input
                 value={subtitle}
                 onChange={(e) => setSubtitle(e.target.value)}
                 placeholder="e.g. A Timeless Examination of Indian Agrarian Life"
-                className="h-11 text-xs"
+                className="w-full h-9 rounded-lg border border-neutral-200 bg-white px-3 text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500 mb-1">
+              <label className="block text-xs font-medium text-neutral-700 mb-1.5">
                 Short Description / Excerpt
               </label>
-              <Textarea
+              <textarea
                 value={shortDescription}
                 onChange={(e) => setShortDescription(e.target.value)}
                 placeholder="1-2 sentences summarizing the book for catalogue cards..."
-                className="min-h-[70px] text-xs"
+                rows={2}
+                className="w-full min-h-[60px] rounded-lg border border-neutral-200 bg-white p-3 text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500 mb-1">
+              <label className="block text-xs font-medium text-neutral-700 mb-1.5">
                 Full Description
               </label>
-              <Textarea
+              <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Complete editorial book overview, key themes, and background..."
-                className="min-h-[140px] text-xs"
+                rows={4}
+                className="w-full min-h-[120px] rounded-lg border border-neutral-200 bg-white p-3 text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
               />
             </div>
           </div>
 
           {/* Pricing & Commercial Model */}
-          <div className="rounded-[24px] bg-white border border-black/[0.06] p-6 space-y-4 shadow-sm">
-            <h3 className="font-bold text-sm text-neutral-900 pb-2 border-b border-black/[0.04]">
+          <div className="rounded-xl bg-white border border-neutral-200/80 p-5 space-y-4 shadow-xs">
+            <h3 className="font-semibold text-sm text-neutral-900 pb-3 border-b border-neutral-100">
               Pricing & Access Entitlement
             </h3>
 
-            <div className="flex items-center gap-3 p-3 rounded-2xl bg-[#FAFAFA] border border-black/5">
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-neutral-50 border border-neutral-200/60">
               <input
                 type="checkbox"
                 id="isFree"
                 checked={isFree}
                 onChange={(e) => setIsFree(e.target.checked)}
-                className="w-4 h-4 rounded text-black focus:ring-0 cursor-pointer"
+                className="w-4 h-4 rounded text-neutral-900 border-neutral-300 focus:ring-neutral-900 cursor-pointer"
               />
-              <label htmlFor="isFree" className="text-xs font-bold text-neutral-800 cursor-pointer">
+              <label htmlFor="isFree" className="text-xs font-semibold text-neutral-800 cursor-pointer">
                 100% Free Book (No payment required, instant claim)
               </label>
             </div>
@@ -287,29 +317,29 @@ export function BookForm({
             {!isFree && (
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500 mb-1">
+                  <label className="block text-xs font-medium text-neutral-700 mb-1.5">
                     Price (INR ₹) *
                   </label>
-                  <Input
+                  <input
                     type="number"
                     min="1"
                     value={priceInr}
                     onChange={(e) => setPriceInr(Number(e.target.value))}
                     required
-                    className="h-11 text-xs font-mono"
+                    className="w-full h-9 rounded-lg border border-neutral-200 bg-white px-3 text-xs font-mono text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500 mb-1">
+                  <label className="block text-xs font-medium text-neutral-700 mb-1.5">
                     Original Price (INR ₹)
                   </label>
-                  <Input
+                  <input
                     type="number"
                     min="1"
                     value={originalPriceInr || ""}
                     onChange={(e) => setOriginalPriceInr(e.target.value ? Number(e.target.value) : null)}
                     placeholder="e.g. 299 (shows strike-through)"
-                    className="h-11 text-xs font-mono"
+                    className="w-full h-9 rounded-lg border border-neutral-200 bg-white px-3 text-xs font-mono text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
                   />
                 </div>
               </div>
@@ -318,6 +348,7 @@ export function BookForm({
 
           {/* Cloudflare R2 Protected Digital Assets */}
           <PublicationAssetManager
+            ref={assetManagerRef}
             publicationId={effectivePublicationId}
             isDraft={!effectivePublicationId}
             onPublicationSaveRequired={() => {
@@ -326,53 +357,55 @@ export function BookForm({
           />
 
           {/* Table of Contents */}
-          <div className="rounded-[24px] bg-white border border-black/[0.06] p-6 space-y-3 shadow-sm">
-            <h3 className="font-bold text-sm text-neutral-900 pb-2 border-b border-black/[0.04]">
+          <div className="rounded-xl bg-white border border-neutral-200/80 p-5 space-y-3 shadow-xs">
+            <h3 className="font-semibold text-sm text-neutral-900 pb-3 border-b border-neutral-100">
               Table of Contents (Chapters)
             </h3>
             <p className="text-[11px] text-neutral-500">
               Enter one chapter per line. These will be parsed into the interactive reader index.
             </p>
-            <Textarea
+            <textarea
               value={tocText}
               onChange={(e) => setTocText(e.target.value)}
               placeholder={"अध्याय 1: शुरुआत\nअध्याय 2: मन की शांति\nअध्याय 3: सफलता के सूत्र"}
-              className="min-h-[120px] font-mono text-xs"
+              rows={4}
+              className="w-full min-h-[100px] rounded-lg border border-neutral-200 bg-white p-3 font-mono text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
             />
           </div>
 
           {/* SEO Metadata */}
-          <div className="rounded-[24px] bg-white border border-black/[0.06] p-6 space-y-4 shadow-sm">
-            <h3 className="font-bold text-sm text-neutral-900 pb-2 border-b border-black/[0.04]">
+          <div className="rounded-xl bg-white border border-neutral-200/80 p-5 space-y-4 shadow-xs">
+            <h3 className="font-semibold text-sm text-neutral-900 pb-3 border-b border-neutral-100">
               Search Engine Optimization (SEO)
             </h3>
 
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500 mb-1">
+              <label className="block text-xs font-medium text-neutral-700 mb-1.5">
                 Custom SEO Title
               </label>
-              <Input
+              <input
                 value={seoTitle}
                 onChange={(e) => setSeoTitle(e.target.value)}
                 placeholder="Leave blank to use default template: [Title] — by [Author]"
-                className="h-11 text-xs"
+                className="w-full h-9 rounded-lg border border-neutral-200 bg-white px-3 text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500 mb-1">
+              <label className="block text-xs font-medium text-neutral-700 mb-1.5">
                 Meta Description
               </label>
-              <Textarea
+              <textarea
                 value={seoDescription}
                 onChange={(e) => setSeoDescription(e.target.value)}
                 placeholder="Concise 150-160 character summary for Google search snippets..."
-                className="min-h-[70px] text-xs"
+                rows={2}
+                className="w-full min-h-[60px] rounded-lg border border-neutral-200 bg-white p-3 text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
               />
             </div>
 
             {/* Live Search Preview */}
-            <div className="p-4 rounded-2xl bg-[#FAFAFA] border border-black/5 space-y-1">
+            <div className="p-3.5 rounded-lg bg-neutral-50 border border-neutral-200/60 space-y-1">
               <span className="text-[10px] uppercase font-bold text-neutral-400 block mb-1">
                 Google Search Result Preview
               </span>
@@ -392,8 +425,8 @@ export function BookForm({
         {/* Right Column: Settings & Metadata */}
         <div className="space-y-6">
           {/* Status & Visibility */}
-          <div className="rounded-[24px] bg-white border border-black/[0.06] p-6 space-y-3 shadow-sm">
-            <h3 className="font-bold text-sm text-neutral-900 pb-2 border-b border-black/[0.04]">
+          <div className="rounded-xl bg-white border border-neutral-200/80 p-5 space-y-3 shadow-xs">
+            <h3 className="font-semibold text-sm text-neutral-900 pb-3 border-b border-neutral-100">
               Visibility & Badges
             </h3>
 
@@ -403,9 +436,9 @@ export function BookForm({
                   type="checkbox"
                   checked={isPublished}
                   onChange={(e) => setIsPublished(e.target.checked)}
-                  className="rounded text-black"
+                  className="w-4 h-4 rounded text-neutral-900 border-neutral-300 focus:ring-neutral-900"
                 />
-                <span className="font-bold text-neutral-800">Publicly Published</span>
+                <span className="font-semibold text-neutral-800">Publicly Published</span>
               </label>
 
               <label className="flex items-center gap-2 cursor-pointer">
@@ -413,7 +446,7 @@ export function BookForm({
                   type="checkbox"
                   checked={isFeatured}
                   onChange={(e) => setIsFeatured(e.target.checked)}
-                  className="rounded text-black"
+                  className="w-4 h-4 rounded text-neutral-900 border-neutral-300 focus:ring-neutral-900"
                 />
                 <span className="text-neutral-700">Homepage Featured Showcase</span>
               </label>
@@ -423,7 +456,7 @@ export function BookForm({
                   type="checkbox"
                   checked={isBestseller}
                   onChange={(e) => setIsBestseller(e.target.checked)}
-                  className="rounded text-black"
+                  className="w-4 h-4 rounded text-neutral-900 border-neutral-300 focus:ring-neutral-900"
                 />
                 <span className="text-neutral-700">Bestseller Badge</span>
               </label>
@@ -431,37 +464,37 @@ export function BookForm({
           </div>
 
           {/* Categories Assignment */}
-          <div className="rounded-[24px] bg-white border border-black/[0.06] p-6 space-y-3 shadow-sm">
-            <h3 className="font-bold text-sm text-neutral-900 pb-2 border-b border-black/[0.04]">
+          <div className="rounded-xl bg-white border border-neutral-200/80 p-5 space-y-3 shadow-xs">
+            <h3 className="font-semibold text-sm text-neutral-900 pb-3 border-b border-neutral-100">
               Categories
             </h3>
-            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            <div className="p-3 rounded-lg bg-neutral-50 border border-neutral-200/60 space-y-2 max-h-48 overflow-y-auto">
               {categories.map((c) => (
                 <label key={c.id} className="flex items-center gap-2 text-xs cursor-pointer">
                   <input
                     type="checkbox"
                     checked={categoryIds.includes(c.id)}
                     onChange={() => toggleCategory(c.id)}
-                    className="rounded text-black"
+                    className="w-3.5 h-3.5 rounded text-neutral-900 border-neutral-300 focus:ring-neutral-900"
                   />
-                  <span>{c.name}</span>
+                  <span className="text-neutral-700 font-medium">{c.name}</span>
                 </label>
               ))}
             </div>
           </div>
 
           {/* Format & Specs */}
-          <div className="rounded-[24px] bg-white border border-black/[0.06] p-6 space-y-4 shadow-sm">
-            <h3 className="font-bold text-sm text-neutral-900 pb-2 border-b border-black/[0.04]">
+          <div className="rounded-xl bg-white border border-neutral-200/80 p-5 space-y-4 shadow-xs">
+            <h3 className="font-semibold text-sm text-neutral-900 pb-3 border-b border-neutral-100">
               Specifications
             </h3>
 
             <div>
-              <label className="block text-[11px] font-bold uppercase text-neutral-500 mb-1">Format</label>
+              <label className="block text-xs font-medium text-neutral-700 mb-1.5">Format</label>
               <select
                 value={format}
                 onChange={(e) => setFormat(e.target.value)}
-                className="w-full h-10 rounded-full border border-black/10 bg-[#FAFAFA] px-3 text-xs"
+                className="w-full h-9 rounded-lg border border-neutral-200 bg-white px-3 text-xs font-medium text-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
               >
                 <option value="PDF">PDF eBook</option>
                 <option value="Audiobook">Audiobook Edition</option>
@@ -470,35 +503,35 @@ export function BookForm({
             </div>
 
             <div>
-              <label className="block text-[11px] font-bold uppercase text-neutral-500 mb-1">Language</label>
-              <Input
+              <label className="block text-xs font-medium text-neutral-700 mb-1.5">Language</label>
+              <input
                 value={language}
                 onChange={(e) => setLanguage(e.target.value)}
-                className="h-10 text-xs"
+                className="w-full h-9 rounded-lg border border-neutral-200 bg-white px-3 text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] font-bold uppercase text-neutral-500 mb-1">Pages</label>
-              <Input
+              <label className="block text-xs font-medium text-neutral-700 mb-1.5">Pages</label>
+              <input
                 type="number"
                 value={pages}
                 onChange={(e) => setPages(e.target.value ? Number(e.target.value) : "")}
-                className="h-10 text-xs font-mono"
+                className="w-full h-9 rounded-lg border border-neutral-200 bg-white px-3 text-xs font-mono text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] font-bold uppercase text-neutral-500 mb-1">Audio Duration</label>
-              <Input
+              <label className="block text-xs font-medium text-neutral-700 mb-1.5">Audio Duration</label>
+              <input
                 value={audioDuration}
                 onChange={(e) => setAudioDuration(e.target.value)}
                 placeholder="e.g. 4h 15m"
-                className="h-10 text-xs"
+                className="w-full h-9 rounded-lg border border-neutral-200 bg-white px-3 text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-900 transition-colors"
               />
             </div>
 
-            <div className="pt-2 border-t border-black/[0.04]">
+            <div className="pt-2 border-t border-neutral-100">
               <CloudinaryUpload
                 value={coverImageUrl}
                 onChange={(url) => setCoverImageUrl(url)}
