@@ -19,14 +19,6 @@ const nextConfig: NextConfig = {
     "localhost:3000",
     "localhost",
   ],
-  turbopack: {
-    rules: {
-      "*.css": {
-        loaders: ["@tailwindcss/turbopack"],
-        as: "*.css",
-      },
-    },
-  },
 };
 
 export default nextConfig;
