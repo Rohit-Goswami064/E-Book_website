@@ -40,6 +40,12 @@ export interface AdminOrder {
   customer_name: string | null
   customer_phone: string | null
   created_at: string
+  metadata?: {
+    is_new_account?: boolean
+    book_id?: string
+    customer_phone?: string
+  } | null
+  entitlement_status?: "granted" | "pending" | "revoked" | null
   order_items: AdminOrderItem[]
   payments: AdminPayment[]
   refunds: AdminRefund[]
@@ -225,6 +231,19 @@ export async function getAdminOverviewMetrics(): Promise<AdminOverviewStats> {
       o.customer_email,
       o.customer_name,
       o.customer_phone,
+      o.metadata,
+      CASE
+        WHEN EXISTS (
+          SELECT 1 FROM public.book_entitlements be 
+          WHERE be.order_id = o.id AND be.is_revoked = false
+        ) THEN 'granted'
+        WHEN EXISTS (
+          SELECT 1 FROM public.book_entitlements be 
+          WHERE be.order_id = o.id AND be.is_revoked = true
+        ) THEN 'revoked'
+        WHEN o.status = 'paid' THEN 'granted'
+        ELSE 'pending'
+      END as entitlement_status,
       o.created_at,
       COALESCE(
         (
@@ -652,6 +671,19 @@ export async function getAdminOrdersList(options: {
       o.customer_email,
       o.customer_name,
       o.customer_phone,
+      o.metadata,
+      CASE
+        WHEN EXISTS (
+          SELECT 1 FROM public.book_entitlements be 
+          WHERE be.order_id = o.id AND be.is_revoked = false
+        ) THEN 'granted'
+        WHEN EXISTS (
+          SELECT 1 FROM public.book_entitlements be 
+          WHERE be.order_id = o.id AND be.is_revoked = true
+        ) THEN 'revoked'
+        WHEN o.status = 'paid' THEN 'granted'
+        ELSE 'pending'
+      END as entitlement_status,
       o.created_at,
       COALESCE(
         (

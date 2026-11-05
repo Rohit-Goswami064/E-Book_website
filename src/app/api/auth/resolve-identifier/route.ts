@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { dbQuery } from "@/lib/db"
+import { normalizeIndianMobile } from "@/lib/auth/mobile-normalizer"
 import { z } from "zod"
 
 export const dynamic = "force-dynamic"
@@ -27,23 +29,57 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // 2. Mobile number resolution via secure PostgreSQL RPC
-    const supabase = await createClient()
-    const { data: result, error } = await supabase.rpc("resolve_user_identifier", {
-      p_identifier: clean,
-    })
+    // 2. Mobile number resolution with Indian normalization (+91, spaces, 10 digits)
+    const normalizedMobile = normalizeIndianMobile(clean)
+    const lookupPhone = normalizedMobile || clean.replace(/\D/g, "")
 
-    if (error) {
-      console.error("[Identifier Resolution DB Error]:", error)
-      return NextResponse.json({ error: "Failed to resolve account identifier" }, { status: 500 })
+    // Try PostgreSQL RPC first
+    try {
+      const supabase = await createClient()
+      const { data: result } = await supabase.rpc("resolve_user_identifier", {
+        p_identifier: lookupPhone,
+      })
+
+      if (result && result.found && result.email) {
+        return NextResponse.json({
+          email: result.email,
+          phone: result.phone || lookupPhone,
+          isPhone: true,
+        })
+      }
+    } catch (rpcErr) {
+      console.warn("[RPC resolve_user_identifier notice]:", rpcErr)
     }
 
-    if (result && result.found && result.email) {
-      return NextResponse.json({
-        email: result.email,
-        phone: result.phone || clean,
-        isPhone: true,
-      })
+    // Direct database query fallback via pool (searches auth.users and public.profiles)
+    if (lookupPhone) {
+      const dbRes = await dbQuery<{ email: string; phone: string }>(
+        `
+        SELECT 
+          u.email,
+          COALESCE(u.phone, p.phone) as phone
+        FROM auth.users u
+        LEFT JOIN public.profiles p ON p.id = u.id
+        WHERE (
+          u.phone = $1
+          OR u.phone = '+91' || $1
+          OR REGEXP_REPLACE(COALESCE(u.phone, ''), '[^0-9]', '', 'g') = $1
+          OR p.phone = $1
+          OR p.phone = '+91' || $1
+          OR REGEXP_REPLACE(COALESCE(p.phone, ''), '[^0-9]', '', 'g') = $1
+        )
+        LIMIT 1;
+        `,
+        [lookupPhone]
+      )
+
+      if (dbRes.rows.length > 0 && dbRes.rows[0].email) {
+        return NextResponse.json({
+          email: dbRes.rows[0].email,
+          phone: dbRes.rows[0].phone || lookupPhone,
+          isPhone: true,
+        })
+      }
     }
 
     return NextResponse.json(

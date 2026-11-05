@@ -4,10 +4,11 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Loader2, Mail, Lock, ShieldCheck, ArrowRight, BookOpen, Tag, X } from "lucide-react"
+import { Loader2, Mail, Lock, ShieldCheck, ArrowRight, BookOpen, Tag, X, User, Phone, Eye, EyeOff, KeyRound } from "lucide-react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { formatCurrency } from "@/lib/utils"
+import { normalizeIndianMobile, validatePasswordComplexity } from "@/lib/auth/mobile-normalizer"
 
 declare global {
   interface Window {
@@ -85,7 +86,14 @@ export function FrictionlessCheckout({
   onSuccess,
 }: FrictionlessCheckoutProps) {
   const router = useRouter()
+  const [fullName, setFullName] = React.useState("")
+  const [mobile, setMobile] = React.useState("")
   const [email, setEmail] = React.useState(initialEmail)
+  const [password, setPassword] = React.useState("")
+  const [confirmPassword, setConfirmPassword] = React.useState("")
+  const [showPassword, setShowPassword] = React.useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = React.useState(false)
+
   const [loadingStage, setLoadingStage] = React.useState<CheckoutStage>("idle")
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
 
@@ -157,6 +165,8 @@ export function FrictionlessCheckout({
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user?.email) {
         setEmail(user.email)
+        if (user.user_metadata?.full_name) setFullName(user.user_metadata.full_name)
+        if (user.user_metadata?.phone) setMobile(user.user_metadata.phone)
       }
     }).catch(() => {})
   }, [initialEmail])
@@ -169,16 +179,37 @@ export function FrictionlessCheckout({
     return formatCurrency(amountInPaise, currency)
   }, [effectivePrice, currency])
 
-
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault()
 
     const cleanEmail = email.trim().toLowerCase()
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    const cleanMobile = normalizeIndianMobile(mobile)
+    const cleanName = fullName.trim()
 
+    if (!cleanName || cleanName.length < 2) {
+      setErrorMessage("Please enter your full name.")
+      return
+    }
+
+    if (!cleanMobile) {
+      setErrorMessage("Please enter a valid 10-digit Indian mobile number.")
+      return
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!cleanEmail || !emailRegex.test(cleanEmail)) {
       setErrorMessage("Please enter a valid email address.")
-      toast.error("Please provide a valid email address.")
+      return
+    }
+
+    const complexity = validatePasswordComplexity(password)
+    if (!complexity.valid) {
+      setErrorMessage(complexity.errors[0] || "Password must be at least 8 characters with upper, lower, number and special char.")
+      return
+    }
+
+    if (confirmPassword && password !== confirmPassword) {
+      setErrorMessage("Passwords do not match.")
       return
     }
 
@@ -194,7 +225,11 @@ export function FrictionlessCheckout({
           bookId,
           couponCode: appliedCoupon?.code || null,
           guestDetails: {
+            fullName: cleanName,
+            mobile: cleanMobile,
             email: cleanEmail,
+            password: password,
+            confirmPassword: confirmPassword || password,
           },
         }),
       })
@@ -207,19 +242,6 @@ export function FrictionlessCheckout({
 
       // 2. If the book is free (or 100% discounted)
       if (orderData.isFree) {
-        if (orderData.autoLoginToken) {
-          setLoadingStage("authenticating")
-          const supabase = createClient()
-          const targetEmail = orderData.email || orderData.userEmail || cleanEmail
-          try {
-            await supabase.auth.verifyOtp({
-              email: targetEmail,
-              token: orderData.autoLoginToken,
-              type: "email",
-            })
-          } catch {}
-        }
-
         setLoadingStage("redirecting")
         toast.success(orderData.message || "Book successfully added to your library!")
         if (onSuccess) onSuccess(orderData.orderId)
@@ -253,7 +275,8 @@ export function FrictionlessCheckout({
         order_id: orderData.razorpayOrderId,
         prefill: {
           email: cleanEmail,
-          name: orderData.userName || cleanEmail.split("@")[0] || "Reader",
+          name: cleanName,
+          contact: cleanMobile,
         },
         theme: {
           color: "#111111",
@@ -289,39 +312,14 @@ export function FrictionlessCheckout({
               throw new Error(verifyData.error || "Payment verification failed. Please contact support.")
             }
 
-            // 6. Silent Auto-Login Handoff via returned autoLoginToken
-            if (verifyData.autoLoginToken) {
-              setLoadingStage("authenticating")
+            // Client authentication
+            try {
               const supabase = createClient()
-              const targetEmail = verifyData.email || cleanEmail
-
-              // Primary verification attempt with type: 'email'
-              const { error: otpError } = await supabase.auth.verifyOtp({
-                email: targetEmail,
-                token: verifyData.autoLoginToken,
-                type: "email",
+              await supabase.auth.signInWithPassword({
+                email: cleanEmail,
+                password: password,
               })
-
-              if (otpError) {
-                console.warn("[Silent Auto-Login]: type='email' failed, trying fallback:", otpError.message)
-                // Fallback attempt with type: 'magiclink' or token_hash
-                const { error: magicError } = await supabase.auth.verifyOtp({
-                  email: targetEmail,
-                  token: verifyData.autoLoginToken,
-                  type: "magiclink",
-                } as any)
-
-                if (magicError) {
-                  // Fallback with token_hash in case GoTrue returned a hashed token
-                  await supabase.auth.verifyOtp({
-                    token_hash: verifyData.autoLoginToken,
-                    type: "magiclink",
-                  } as any).catch(() => {})
-                }
-              }
-
-              console.log("[Silent Auto-Login]: Session established successfully.")
-            }
+            } catch {}
 
             // 7. Instant Reader Handoff
             setLoadingStage("redirecting")
@@ -349,10 +347,8 @@ export function FrictionlessCheckout({
 
       rzp.open()
     } catch (err: any) {
-      console.error("[Checkout Initiation Error]:", err)
-      const msg = err?.message || "Failed to initiate payment."
-      setErrorMessage(msg)
-      toast.error(msg)
+      setErrorMessage(err.message || "An error occurred during checkout")
+      toast.error(err.message || "An error occurred during checkout")
       setLoadingStage("idle")
     }
   }
@@ -378,6 +374,48 @@ export function FrictionlessCheckout({
   return (
     <div className={`w-full max-w-md mx-auto ${className}`}>
       <form onSubmit={handleCheckout} className="space-y-4">
+        {/* Full Name */}
+        <div className="space-y-1.5 text-left">
+          <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+            Full Name
+          </label>
+          <div className="relative">
+            <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+            <Input
+              type="text"
+              required
+              disabled={isLoading}
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Rahul Sharma"
+              className="pl-10 h-11 bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 rounded-xl text-sm"
+            />
+          </div>
+        </div>
+
+        {/* Mobile Number */}
+        <div className="space-y-1.5 text-left">
+          <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+            Mobile Number (Login ID)
+          </label>
+          <div className="relative flex items-center">
+            <span className="absolute left-3 text-xs font-semibold text-neutral-500 select-none">
+              +91
+            </span>
+            <Input
+              type="tel"
+              maxLength={10}
+              required
+              disabled={isLoading}
+              value={mobile}
+              onChange={(e) => setMobile(e.target.value.replace(/\D/g, ""))}
+              placeholder="9876543210"
+              className="pl-11 h-11 bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 rounded-xl text-sm font-mono"
+            />
+          </div>
+        </div>
+
+        {/* Email */}
         <div className="space-y-1.5 text-left">
           <label htmlFor="checkout-email" className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
             Email for eBook Access
@@ -395,13 +433,66 @@ export function FrictionlessCheckout({
                 if (errorMessage) setErrorMessage(null)
               }}
               placeholder="you@example.com"
-              className="pl-10 h-12 bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 rounded-xl text-sm focus-visible:ring-2 focus-visible:ring-neutral-900 dark:focus-visible:ring-neutral-100"
+              className="pl-10 h-11 bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 rounded-xl text-sm"
             />
           </div>
-          {errorMessage && (
-            <p className="text-xs text-rose-500 font-medium mt-1">{errorMessage}</p>
-          )}
         </div>
+
+        {/* Password */}
+        <div className="space-y-1.5 text-left">
+          <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+            Password (Required)
+          </label>
+          <div className="relative">
+            <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+            <Input
+              type={showPassword ? "text" : "password"}
+              required
+              disabled={isLoading}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Min 8 characters (Upper, lower, digit, symbol)"
+              className="pl-10 pr-10 h-11 bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 rounded-xl text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700"
+            >
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+
+        {/* Confirm Password */}
+        <div className="space-y-1.5 text-left">
+          <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+            Confirm Password
+          </label>
+          <div className="relative">
+            <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+            <Input
+              type={showConfirmPassword ? "text" : "password"}
+              required
+              disabled={isLoading}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Re-enter password"
+              className="pl-10 pr-10 h-11 bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 rounded-xl text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700"
+            >
+              {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+
+        {errorMessage && (
+          <p className="text-xs text-rose-500 font-medium text-left">{errorMessage}</p>
+        )}
 
         {/* Coupon Code Section */}
         {price > 0 && (
@@ -478,7 +569,7 @@ export function FrictionlessCheckout({
 
         <div className="flex items-center justify-center gap-1.5 text-[11px] text-neutral-500 dark:text-neutral-400 pt-1">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-          <span>Instant reading • No password required • Secure 256-bit payment</span>
+          <span>100% Secure Razorpay Checkout • SSL Encrypted</span>
         </div>
       </form>
     </div>

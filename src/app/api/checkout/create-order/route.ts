@@ -1,21 +1,31 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth/roles"
 import { createClient } from "@/lib/supabase/server"
-import { createAdminClient } from "@/lib/supabase/admin"
 import { getRazorpayClient } from "@/lib/razorpay/client"
+import {
+  checkCustomerAccount,
+  verifyExistingUserPassword,
+  updateCustomerPassword,
+  provisionNewCustomer,
+} from "@/lib/auth/checkout-customer"
+import {
+  normalizeIndianMobile,
+  validatePasswordComplexity,
+} from "@/lib/auth/mobile-normalizer"
 import { z } from "zod"
-import crypto from "crypto"
 
 export const dynamic = "force-dynamic"
 
 const createOrderSchema = z.object({
-  bookId: z.string().uuid(),
+  bookId: z.string().uuid("Invalid book identifier"),
   couponCode: z.string().optional().nullable(),
   guestDetails: z
     .object({
-      fullName: z.string().optional().nullable(),
-      mobile: z.string().optional().nullable(),
+      fullName: z.string().min(2, "Please enter your full name (at least 2 characters)"),
+      mobile: z.string().min(10, "Please enter a valid 10-digit mobile number"),
       email: z.string().email("Please provide a valid email address"),
+      password: z.string().min(1, "Password is required"),
+      confirmPassword: z.string().optional().nullable(),
     })
     .optional()
     .nullable(),
@@ -26,8 +36,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const parsed = createOrderSchema.safeParse(body)
     if (!parsed.success) {
+      const errorMsg =
+        parsed.error.issues?.[0]?.message || "Invalid order parameters"
       return NextResponse.json(
-        { error: "Invalid parameters", details: parsed.error.flatten() },
+        { error: errorMsg, details: parsed.error.format() },
         { status: 400 }
       )
     }
@@ -35,7 +47,7 @@ export async function POST(request: NextRequest) {
     const { bookId, couponCode, guestDetails } = parsed.data
     const supabase = await createClient()
 
-    // 1. Resolve user: Either currently authenticated or create/retrieve guest user
+    // 1. Authoritative User Resolution & Account Authentication
     const user = await getCurrentUser()
     let resolvedUserId: string
     let customerEmail: string
@@ -44,55 +56,131 @@ export async function POST(request: NextRequest) {
     let isNewAccount = false
 
     if (user) {
+      // Authenticated session user
       resolvedUserId = user.id
       customerEmail = user.email || ""
       customerName = user.user_metadata?.full_name || null
       customerPhone = user.user_metadata?.phone || null
+      isNewAccount = false
     } else {
-      // Guest Checkout Flow
-      if (!guestDetails || !guestDetails.email) {
+      // Instant Checkout Customer Flow
+      if (!guestDetails) {
         return NextResponse.json(
-          { error: "A valid email address is required for guest checkout." },
+          { error: "Customer details including mobile number, email, and password are required." },
+          { status: 400 }
+        )
+      }
+
+      // A. Normalize contact information
+      const cleanMobile = normalizeIndianMobile(guestDetails.mobile)
+      if (!cleanMobile) {
+        return NextResponse.json(
+          { error: "Please enter a valid 10-digit Indian mobile number." },
           { status: 400 }
         )
       }
 
       customerEmail = guestDetails.email.trim().toLowerCase()
-      customerName = (guestDetails.fullName && guestDetails.fullName.trim()) || customerEmail.split("@")[0] || "Reader"
-      
-      let customerPhone: string | null = null
-      if (guestDetails.mobile && guestDetails.mobile.trim()) {
-        let clean = guestDetails.mobile.trim().replace(/[^0-9]/g, "")
-        if (clean.length === 12 && clean.startsWith("91")) {
-          clean = clean.slice(2)
-        }
-        if (clean.length >= 10) {
-          customerPhone = clean
-        }
-      }
+      customerName = guestDetails.fullName.trim()
+      customerPhone = cleanMobile
 
-      // Passwordless Guest Provisioning: No password generated or stored
-      const { data: guestRes, error: guestError } = await supabase.rpc(
-        "get_or_create_guest_user",
-        {
-          p_email: customerEmail,
-          p_phone: customerPhone,
-          p_full_name: customerName,
-        }
-      )
+      // B. Authoritative check for existing accounts & account conflict detection
+      const accountCheck = await checkCustomerAccount(customerEmail, cleanMobile)
 
-      if (guestError || !guestRes?.user_id) {
-        console.error("[Guest Account Resolution Error]:", guestError)
+      if (accountCheck.conflict) {
         return NextResponse.json(
-          { error: "Could not create or verify your customer account. Please retry." },
-          { status: 500 }
+          {
+            error:
+              accountCheck.conflictError ||
+              "Account Conflict: The provided mobile number and email address belong to two different accounts. Please use matching credentials or sign in before checking out.",
+            conflict: true,
+          },
+          { status: 400 }
         )
       }
 
-      resolvedUserId = guestRes.user_id
-      isNewAccount = !!guestRes.is_new_account
-      customerEmail = guestRes.email || customerEmail
-      customerPhone = guestRes.phone || customerPhone
+      if (accountCheck.exists && accountCheck.userId) {
+        // C. Existing Customer Workflow
+        if (accountCheck.hasPassword) {
+          // Require password verification for existing account ownership
+          const isPasswordValid = await verifyExistingUserPassword(
+            accountCheck.userId,
+            guestDetails.password
+          )
+
+          if (!isPasswordValid) {
+            return NextResponse.json(
+              {
+                error:
+                  "Incorrect password for this account. Please enter your valid password to authenticate and link this purchase.",
+                isExistingAccount: true,
+              },
+              { status: 401 }
+            )
+          }
+
+          resolvedUserId = accountCheck.userId
+          customerEmail = accountCheck.email || customerEmail
+          customerPhone = accountCheck.phone || cleanMobile
+          customerName = customerName || accountCheck.fullName || "Customer"
+          isNewAccount = false
+        } else {
+          // Legacy account without password: Set password securely
+          const complexity = validatePasswordComplexity(guestDetails.password)
+          if (!complexity.valid) {
+            return NextResponse.json(
+              { error: complexity.errors[0], details: complexity.errors },
+              { status: 400 }
+            )
+          }
+
+          if (
+            guestDetails.confirmPassword &&
+            guestDetails.password !== guestDetails.confirmPassword
+          ) {
+            return NextResponse.json(
+              { error: "Password and Confirm Password do not match." },
+              { status: 400 }
+            )
+          }
+
+          await updateCustomerPassword(accountCheck.userId, guestDetails.password)
+          resolvedUserId = accountCheck.userId
+          customerEmail = accountCheck.email || customerEmail
+          customerPhone = accountCheck.phone || cleanMobile
+          customerName = customerName || accountCheck.fullName || "Customer"
+          isNewAccount = false
+        }
+      } else {
+        // D. New Customer Workflow: Validate complexity & confirm match
+        const complexity = validatePasswordComplexity(guestDetails.password)
+        if (!complexity.valid) {
+          return NextResponse.json(
+            { error: complexity.errors[0], details: complexity.errors },
+            { status: 400 }
+          )
+        }
+
+        if (guestDetails.password !== guestDetails.confirmPassword) {
+          return NextResponse.json(
+            { error: "Password and Confirm Password do not match. Please re-enter your confirm password." },
+            { status: 400 }
+          )
+        }
+
+        // Provision new customer in auth.users with bcrypt blowfish hash
+        const newCustomer = await provisionNewCustomer({
+          email: customerEmail,
+          phone: cleanMobile,
+          fullName: customerName,
+          password: guestDetails.password,
+        })
+
+        resolvedUserId = newCustomer.userId
+        isNewAccount = true
+        customerEmail = newCustomer.email
+        customerPhone = newCustomer.phone
+      }
     }
 
     // 2. Fetch authoritative book record from database
@@ -209,6 +297,7 @@ export async function POST(request: NextRequest) {
           is_free_acquisition: true,
           is_guest_checkout: !user,
           is_new_account: isNewAccount,
+          customer_phone: customerPhone,
         },
       })
 
@@ -232,53 +321,13 @@ export async function POST(request: NextRequest) {
         } catch {}
       }
 
-      // Passwordless Guest Handoff: Generate magic link and autoLoginToken for instant session handoff
-      let otpSent = false
-      let autoLoginToken: string | null = null
-      if (!user && customerEmail) {
-        try {
-          const origin = request.nextUrl.origin || process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
-          const adminSupabase = createAdminClient()
-          const { data: linkData, error: linkError } = await adminSupabase.auth.admin.generateLink({
-            type: "magiclink",
-            email: customerEmail,
-            options: {
-              redirectTo: `${origin}/read/${book.id}`,
-            },
-          })
-          if (!linkError && linkData?.properties) {
-            otpSent = true
-            const actionLink = linkData.properties.action_link
-            if (actionLink) {
-              try {
-                const parsedUrl = new URL(actionLink)
-                autoLoginToken = parsedUrl.searchParams.get("token")
-              } catch {
-                const match = actionLink.match(/[?&]token=([^&]+)/)
-                if (match) autoLoginToken = match[1]
-              }
-            }
-            if (!autoLoginToken) {
-              autoLoginToken = (linkData.properties as any).email_otp || (linkData.properties as any).hashed_token || null
-            }
-          }
-        } catch (otpErr: any) {
-          console.error("[Free Claim Magic Link Error]:", otpErr)
-        }
-      }
-
       return NextResponse.json({
         isFree: true,
         orderId: orderRes.order_id,
         orderNumber: orderNumber,
-        message: !user
-          ? "Book successfully added to your library! Session authenticated."
-          : "Book successfully added to your library!",
+        message: "Book successfully added to your library!",
         isNewAccount,
         isGuestCheckout: !user,
-        needsVerification: false,
-        otpSent,
-        autoLoginToken: autoLoginToken || undefined,
         email: customerEmail,
         userEmail: customerEmail,
         userPhone: customerPhone,
@@ -304,6 +353,7 @@ export async function POST(request: NextRequest) {
         book_title: book.title,
         is_guest_checkout: !user,
         is_new_account: isNewAccount,
+        customer_phone: customerPhone,
       },
     })
 
@@ -353,7 +403,7 @@ export async function POST(request: NextRequest) {
       throw new Error(`Failed to record payment pending state: ${paymentError.message}`)
     }
 
-    // 9. Return required frontend checkout fields
+    // 9. Return required frontend checkout fields (Never exposing passwords)
     const activeKeyId = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID
     return NextResponse.json({
       isFree: false,

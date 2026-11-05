@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { Loader2, Lock } from "lucide-react"
+import { validatePasswordComplexity } from "@/lib/auth/mobile-normalizer"
 
 export default function ResetPasswordPage() {
   const router = useRouter()
@@ -22,8 +23,9 @@ export default function ResetPasswordPage() {
       toast.error("Passwords do not match.")
       return
     }
-    if (password.length < 6) {
-      toast.error("Password must be at least 6 characters.")
+    const complexity = validatePasswordComplexity(password)
+    if (!complexity.valid) {
+      toast.error(complexity.errors[0] || "Password must be at least 8 characters with uppercase, lowercase, number, and special character.")
       return
     }
 

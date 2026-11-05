@@ -16,7 +16,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
-import { Loader2 } from "lucide-react"
+import { Loader2, Eye, EyeOff } from "lucide-react"
+import { normalizeIndianMobile } from "@/lib/auth/mobile-normalizer"
 
 export function LoginForm({
   className,
@@ -33,6 +34,7 @@ export function LoginForm({
 
   const [email, setEmail] = React.useState(initialIdentifier)
   const [password, setPassword] = React.useState("")
+  const [showPassword, setShowPassword] = React.useState(false)
   const [loading, setLoading] = React.useState(false)
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -41,15 +43,15 @@ export function LoginForm({
 
     try {
       let targetEmail = email.trim()
-      const cleanDigits = targetEmail.replace(/[^0-9]/g, "")
-      const isMobile = !targetEmail.includes("@") && cleanDigits.length >= 10
+      const normalizedMobile = normalizeIndianMobile(targetEmail)
+      const isMobile = !targetEmail.includes("@") && (normalizedMobile !== null || targetEmail.replace(/\D/g, "").length >= 10)
 
       if (isMobile) {
         try {
           const resolveRes = await fetch("/api/auth/resolve-identifier", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ identifier: cleanDigits }),
+            body: JSON.stringify({ identifier: normalizedMobile || targetEmail }),
           })
           const resolveData = await resolveRes.json()
           if (!resolveRes.ok || !resolveData.email) {
@@ -131,12 +133,12 @@ export function LoginForm({
             <div className="flex flex-col gap-5">
               <div className="grid gap-2">
                 <Label htmlFor="identifier" className="text-sm font-medium">
-                  Email or Mobile Number
+                  Email or Mobile Number (Login ID)
                 </Label>
                 <Input
                   id="identifier"
                   type="text"
-                  placeholder="name@example.com or 10-digit mobile"
+                  placeholder="name@example.com or 10-digit mobile (+91)"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -156,15 +158,29 @@ export function LoginForm({
                     Forgot your password?
                   </Link>
                 </div>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••••••"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="rounded-lg h-10 border-input bg-background px-3 text-sm focus-visible:ring-1 focus-visible:ring-ring"
-                />
+                <div className="relative flex items-center">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••••••"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="rounded-lg h-10 border-input bg-background pl-3 pr-10 text-sm focus-visible:ring-1 focus-visible:ring-ring"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 text-neutral-400 hover:text-neutral-700 transition-colors"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
               </div>
 
               <Button

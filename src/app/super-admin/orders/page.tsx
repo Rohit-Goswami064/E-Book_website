@@ -21,6 +21,12 @@ interface Order {
   customer_email: string
   customer_name: string | null
   customer_phone: string | null
+  metadata?: {
+    is_new_account?: boolean
+    book_id?: string
+    customer_phone?: string
+  } | null
+  entitlement_status?: "granted" | "pending" | "revoked" | null
   created_at: string
   order_items?: {
     id: string
@@ -229,8 +235,26 @@ export default function AdminOrdersPage() {
                         <div className="font-medium text-neutral-900">{ord.customer_name || "—"}</div>
                         <div className="text-[11px] text-neutral-500 font-mono">{ord.customer_email}</div>
                         {ord.customer_phone && (
-                          <div className="text-[10px] text-neutral-400 font-mono">📱 {ord.customer_phone}</div>
+                          <div className="text-[10px] text-neutral-400 font-mono">
+                            📱 {ord.customer_phone.startsWith("+91") ? ord.customer_phone : `+91 ${ord.customer_phone}`}
+                          </div>
                         )}
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${
+                              ord.metadata?.is_new_account
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : "bg-neutral-100 text-neutral-700 border-neutral-200"
+                            }`}
+                          >
+                            {ord.metadata?.is_new_account ? "New Account" : "Existing User"}
+                          </span>
+                          {ord.status === "paid" && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-purple-50 text-purple-700 border border-purple-200">
+                              Entitled
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3 px-4 max-w-xs truncate text-neutral-700 font-medium">
                         {bookTitle}
@@ -323,6 +347,38 @@ export default function AdminOrdersPage() {
                 <div>
                   <span className="text-neutral-400 block text-[10px] uppercase">Date Placed</span>
                   <span className="font-mono text-neutral-700">{formatDate(selectedOrder.created_at)}</span>
+                </div>
+              </div>
+
+              {/* Account Linkage & Entitlement Status */}
+              <div className="bg-neutral-50 p-3 rounded-lg border border-neutral-200 space-y-1.5 text-[11px]">
+                <div className="flex justify-between items-center">
+                  <span className="text-neutral-500">Account Linkage:</span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                      selectedOrder.metadata?.is_new_account
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : "bg-blue-50 text-blue-700 border-blue-200"
+                    }`}
+                  >
+                    {selectedOrder.metadata?.is_new_account
+                      ? "New Account Created"
+                      : "Linked to Existing Account"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-neutral-500">Entitlement Status:</span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                      selectedOrder.status === "paid"
+                        ? "bg-purple-50 text-purple-700 border-purple-200"
+                        : "bg-amber-50 text-amber-700 border-amber-200"
+                    }`}
+                  >
+                    {selectedOrder.status === "paid"
+                      ? "Active Library Entitlement Granted"
+                      : "Pending Authorization"}
+                  </span>
                 </div>
               </div>
 

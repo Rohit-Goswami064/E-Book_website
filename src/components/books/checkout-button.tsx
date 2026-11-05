@@ -26,10 +26,20 @@ import {
   ShieldCheck,
   CheckCircle2,
   ArrowRight,
+  Eye,
+  EyeOff,
+  AlertCircle,
+  Lock,
+  UserCheck,
+  KeyRound,
 } from "lucide-react"
 import { toast } from "sonner"
 import { formatCurrency } from "@/lib/utils"
 import { createClient } from "@/lib/supabase/client"
+import {
+  normalizeIndianMobile,
+  validatePasswordComplexity,
+} from "@/lib/auth/mobile-normalizer"
 
 declare global {
   interface Window {
@@ -85,15 +95,30 @@ export function CheckoutButton({
   const [couponError, setCouponError] = React.useState<string | null>(null)
   const [isCouponDialogOpen, setIsCouponDialogOpen] = React.useState(false)
 
-  // Guest Checkout state
+  // Instant Checkout Form state
   const [isGuestDialogOpen, setIsGuestDialogOpen] = React.useState(false)
   const [guestFullName, setGuestFullName] = React.useState(userName || "")
   const [guestMobile, setGuestMobile] = React.useState("")
   const [guestEmail, setGuestEmail] = React.useState(userEmail || "")
+  const [guestPassword, setGuestPassword] = React.useState("")
+  const [guestConfirmPassword, setGuestConfirmPassword] = React.useState("")
+  const [showPassword, setShowPassword] = React.useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = React.useState(false)
+
+  // Account Detection State
+  const [accountState, setAccountState] = React.useState<
+    "idle" | "checking" | "new" | "existing" | "conflict"
+  >("idle")
+  const [accountConflictError, setAccountConflictError] = React.useState<string | null>(null)
+  const [accountMaskedEmail, setAccountMaskedEmail] = React.useState<string | null>(null)
+  const [accountHasPassword, setAccountHasPassword] = React.useState(true)
+
   const [guestErrors, setGuestErrors] = React.useState<{
     fullName?: string
     mobile?: string
     email?: string
+    password?: string
+    confirmPassword?: string
   }>({})
 
   // Success / Account Access Dialog state
@@ -141,6 +166,60 @@ export function CheckoutButton({
   React.useEffect(() => {
     loadRazorpayCheckoutScript().catch(() => {})
   }, [])
+
+  // Debounced check for existing account or conflict when mobile or email changes
+  React.useEffect(() => {
+    const cleanMobile = normalizeIndianMobile(guestMobile)
+    const cleanEmail = guestEmail.trim().toLowerCase()
+    const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)
+
+    if (!cleanMobile && !isValidEmail) {
+      setAccountState("idle")
+      setAccountConflictError(null)
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      setAccountState("checking")
+      try {
+        const res = await fetch("/api/auth/check-account", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mobile: cleanMobile || undefined,
+            email: isValidEmail ? cleanEmail : undefined,
+          }),
+        })
+
+        const data = await res.json()
+        if (res.ok) {
+          if (data.conflict) {
+            setAccountState("conflict")
+            setAccountConflictError(
+              data.conflictError ||
+                "The mobile number and email address belong to two different accounts. Please use matching credentials."
+            )
+          } else if (data.exists && data.accountType === "existing") {
+            setAccountState("existing")
+            setAccountConflictError(null)
+            setAccountMaskedEmail(data.maskedEmail)
+            setAccountHasPassword(data.hasPassword ?? true)
+          } else {
+            setAccountState("new")
+            setAccountConflictError(null)
+            setAccountMaskedEmail(null)
+            setAccountHasPassword(true)
+          }
+        } else {
+          setAccountState("idle")
+        }
+      } catch {
+        setAccountState("idle")
+      }
+    }, 450)
+
+    return () => clearTimeout(timer)
+  }, [guestMobile, guestEmail])
 
   // If user is already entitled, render "Read Now" CTA
   if (isEntitled) {
@@ -237,21 +316,57 @@ export function CheckoutButton({
   // Effective price considering active coupon
   const effectivePriceCents = appliedCoupon ? appliedCoupon.finalPriceCents : priceCents
 
-  // Validate guest checkout input fields
+  // Real-time password complexity state
+  const passwordComplexity = validatePasswordComplexity(guestPassword)
+  const isExistingAccount = accountState === "existing" && accountHasPassword
+
+  // Validate instant checkout input fields
   const validateGuestDetails = () => {
-    const errors: { fullName?: string; mobile?: string; email?: string } = {}
+    const errors: {
+      fullName?: string
+      mobile?: string
+      email?: string
+      password?: string
+      confirmPassword?: string
+    } = {}
+
     if (!guestFullName.trim() || guestFullName.trim().length < 2) {
       errors.fullName = "Please enter your full name (at least 2 characters)."
     }
 
-    const cleanMobile = guestMobile.replace(/[^0-9]/g, "")
-    if (!cleanMobile || cleanMobile.length < 10) {
-      errors.mobile = "Please enter a valid 10-digit mobile number."
+    const cleanMobile = normalizeIndianMobile(guestMobile)
+    if (!cleanMobile) {
+      errors.mobile = "Please enter a valid 10-digit Indian mobile number."
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!guestEmail.trim() || !emailRegex.test(guestEmail.trim())) {
       errors.email = "Please enter a valid email address for ebook access."
+    }
+
+    if (accountState === "conflict") {
+      toast.error(
+        accountConflictError ||
+          "Account Conflict: Mobile number and email address belong to two different accounts."
+      )
+      return false
+    }
+
+    if (isExistingAccount) {
+      // Existing account requires password to authenticate ownership
+      if (!guestPassword) {
+        errors.password = "Please enter your account password to verify ownership."
+      }
+    } else {
+      // New account or account setting password requires strict complexity & confirm match
+      if (!passwordComplexity.valid) {
+        errors.password =
+          passwordComplexity.errors[0] ||
+          "Password must be at least 8 characters with uppercase, lowercase, number, and special character."
+      }
+      if (guestPassword !== guestConfirmPassword) {
+        errors.confirmPassword = "Passwords do not match. Please re-enter confirm password."
+      }
     }
 
     setGuestErrors(errors)
@@ -275,7 +390,7 @@ export function CheckoutButton({
     }
 
     if (!activeEmail) {
-      // Unauthenticated: Open guest checkout modal directly (No login redirect!)
+      // Unauthenticated: Open instant checkout modal
       setGuestErrors({})
       setIsGuestDialogOpen(true)
     } else {
@@ -286,11 +401,17 @@ export function CheckoutButton({
 
   // Execute Order creation & payment (For both Authenticated & Guest checkouts)
   const handleExecuteOrder = async (
-    guestPayload: { fullName: string; mobile: string; email: string } | null
+    guestPayload: {
+      fullName: string
+      mobile: string
+      email: string
+      password?: string
+      confirmPassword?: string
+    } | null
   ) => {
     setLoading(true)
     try {
-      // 1. Create order on server (accepts guest details or session auth)
+      // 1. Create order on server (authoritatively validates account & calculates verified price)
       const res = await fetch("/api/checkout/create-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -315,6 +436,17 @@ export function CheckoutButton({
       if (data.isFree) {
         toast.success(data.message || "Book successfully added to your library!")
         if (guestPayload) {
+          // Attempt immediate client session sign-in if password was entered
+          if (guestPayload.password) {
+            try {
+              const supabase = createClient()
+              await supabase.auth.signInWithPassword({
+                email: data.userEmail || guestPayload.email,
+                password: guestPayload.password,
+              })
+            } catch {}
+          }
+
           setCompletedOrder({
             orderId: data.orderId,
             isNewAccount: !!data.isNewAccount,
@@ -348,6 +480,8 @@ export function CheckoutButton({
         return
       }
 
+      const currentPassword = guestPayload?.password
+
       const options = {
         key: data.keyId,
         amount: data.amountCents,
@@ -364,7 +498,7 @@ export function CheckoutButton({
           color: "#111111",
         },
         handler: async function (response: any) {
-          // 4. Send signatures to server for cryptographic verification
+          // 4. Send signatures to server for cryptographic HMAC-SHA256 verification
           try {
             const verifyRes = await fetch("/api/checkout/verify-payment", {
               method: "POST",
@@ -378,7 +512,20 @@ export function CheckoutButton({
 
             const verifyData = await verifyRes.json()
             if (verifyRes.ok && verifyData.success) {
-              toast.success("Payment verified! Opening your book...")
+              toast.success("Payment verified! Your eBook has been added to your library.")
+
+              // Immediately establish client authentication session so reader opens without redirect to login
+              if (currentPassword && (verifyData.customerEmail || guestPayload?.email)) {
+                try {
+                  const supabase = createClient()
+                  await supabase.auth.signInWithPassword({
+                    email: verifyData.customerEmail || guestPayload?.email,
+                    password: currentPassword,
+                  })
+                } catch (authErr) {
+                  console.warn("[Auto-Session Notice]:", authErr)
+                }
+              }
 
               if (guestPayload || verifyData.isNewAccount) {
                 // Show Guest Account Access & Success Modal
@@ -422,7 +569,7 @@ export function CheckoutButton({
     }
   }
 
-  // Handle Guest Dialog submission
+  // Handle Instant Checkout Form submission
   const handleGuestSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!validateGuestDetails()) return
@@ -431,6 +578,8 @@ export function CheckoutButton({
       fullName: guestFullName.trim(),
       mobile: guestMobile.trim(),
       email: guestEmail.trim(),
+      password: guestPassword,
+      confirmPassword: guestConfirmPassword,
     })
   }
 
@@ -512,20 +661,58 @@ export function CheckoutButton({
         </div>
       )}
 
-      {/* 1. Guest Checkout Modal Dialog */}
+      {/* 1. Instant Checkout Modal Dialog */}
       <Dialog open={isGuestDialogOpen} onOpenChange={setIsGuestDialogOpen}>
-        <DialogContent className="w-[92vw] max-w-md rounded-[24px] p-5 sm:p-7 bg-[#FBFBFA] border border-black/10 shadow-2xl">
+        <DialogContent className="w-[92vw] max-w-md max-h-[92vh] overflow-y-auto rounded-[24px] p-5 sm:p-7 bg-[#FBFBFA] border border-black/10 shadow-2xl">
           <DialogHeader>
             <DialogTitle className="text-xl sm:text-2xl font-bold font-serif text-neutral-900 flex items-center gap-2">
               <ShoppingBag className="w-5 h-5 text-neutral-800" />
               <span>Instant Checkout</span>
             </DialogTitle>
             <DialogDescription className="text-xs text-neutral-500 pt-1">
-              Enter your contact details to complete your order. An account will be secured automatically so you can access your ebook anytime.
+              Complete your contact and security details to place your order. Your ebook will be ready in your private library immediately.
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleGuestSubmit} className="space-y-4 pt-3">
+          {/* Account Status Indicator Banner */}
+          {accountState === "conflict" && (
+            <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-900 flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-[12px]">Account Conflict Detected</p>
+                <p className="text-[11px] text-red-700 mt-0.5 leading-relaxed">
+                  {accountConflictError ||
+                    "The provided mobile number and email address belong to two different accounts. Please use the matching credentials."}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {accountState === "existing" && accountHasPassword && (
+            <div className="p-3 rounded-xl bg-blue-50/80 border border-blue-200/80 text-xs text-blue-900 flex items-start gap-2.5">
+              <UserCheck className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-[12px]">Existing Account Found</p>
+                <p className="text-[11px] text-blue-700 mt-0.5 leading-relaxed">
+                  Welcome back! Please enter your existing password to authenticate and link this purchase to your account.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {accountState === "new" && (
+            <div className="p-3 rounded-xl bg-emerald-50/80 border border-emerald-200/80 text-xs text-emerald-900 flex items-start gap-2.5">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-[12px]">New Customer Account</p>
+                <p className="text-[11px] text-emerald-700 mt-0.5 leading-relaxed">
+                  Set a secure password. You will use your mobile number and this password to sign in to your library from any device.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={handleGuestSubmit} className="space-y-4 pt-1">
             {/* Full Name Field */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-neutral-800 uppercase tracking-wider flex items-center gap-1.5">
@@ -548,7 +735,7 @@ export function CheckoutButton({
               )}
             </div>
 
-            {/* Mobile Number Field */}
+            {/* Mobile Number Field (Login ID) */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-neutral-800 uppercase tracking-wider flex items-center gap-1.5">
                 <Phone className="w-3.5 h-3.5 text-neutral-500" />
@@ -602,10 +789,195 @@ export function CheckoutButton({
                 <p className="text-[11px] text-red-600 font-medium pl-1">{guestErrors.email}</p>
               ) : (
                 <p className="text-[10px] text-neutral-400 pl-1">
-                  Payment receipt, order invoice & password setup link will be sent here.
+                  Payment receipt & order invoice will be delivered here.
                 </p>
               )}
             </div>
+
+            {/* Password Field (Required for both New and Existing) */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-neutral-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-neutral-500" />
+                  <span>
+                    {isExistingAccount ? "Account Password" : "Password (Required)"}
+                  </span>
+                </label>
+                {isExistingAccount && (
+                  <a
+                    href="/forgot-password"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] text-neutral-500 hover:text-neutral-900 underline underline-offset-2"
+                  >
+                    Forgot password?
+                  </a>
+                )}
+              </div>
+              <div className="relative flex items-center">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  value={guestPassword}
+                  onChange={(e) => {
+                    setGuestPassword(e.target.value)
+                    if (guestErrors.password)
+                      setGuestErrors({ ...guestErrors, password: undefined })
+                  }}
+                  placeholder={
+                    isExistingAccount
+                      ? "Enter your account password"
+                      : "Create secure password (min 8 chars)"
+                  }
+                  className="pr-10 h-11 rounded-xl bg-white border-black/15 text-sm"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 text-neutral-400 hover:text-neutral-700 transition-colors"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+              {guestErrors.password && (
+                <p className="text-[11px] text-red-600 font-medium pl-1">
+                  {guestErrors.password}
+                </p>
+              )}
+
+              {/* Password Requirements Checklist (for New Accounts) */}
+              {!isExistingAccount && guestPassword.length > 0 && (
+                <div className="p-2.5 rounded-xl bg-neutral-100/70 border border-black/5 text-[11px] space-y-1 mt-1">
+                  <div className="font-semibold text-neutral-600 text-[10px] uppercase tracking-wide">
+                    Password Security Requirements:
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
+                    <div
+                      className={`flex items-center gap-1.5 ${
+                        passwordComplexity.hasMinLength
+                          ? "text-emerald-700 font-medium"
+                          : "text-neutral-500"
+                      }`}
+                    >
+                      <Check
+                        className={`w-3 h-3 ${
+                          passwordComplexity.hasMinLength
+                            ? "text-emerald-600 stroke-[3]"
+                            : "opacity-30"
+                        }`}
+                      />
+                      <span>8+ characters</span>
+                    </div>
+                    <div
+                      className={`flex items-center gap-1.5 ${
+                        passwordComplexity.hasUppercase && passwordComplexity.hasLowercase
+                          ? "text-emerald-700 font-medium"
+                          : "text-neutral-500"
+                      }`}
+                    >
+                      <Check
+                        className={`w-3 h-3 ${
+                          passwordComplexity.hasUppercase && passwordComplexity.hasLowercase
+                            ? "text-emerald-600 stroke-[3]"
+                            : "opacity-30"
+                        }`}
+                      />
+                      <span>Uppercase & lowercase</span>
+                    </div>
+                    <div
+                      className={`flex items-center gap-1.5 ${
+                        passwordComplexity.hasNumber
+                          ? "text-emerald-700 font-medium"
+                          : "text-neutral-500"
+                      }`}
+                    >
+                      <Check
+                        className={`w-3 h-3 ${
+                          passwordComplexity.hasNumber
+                            ? "text-emerald-600 stroke-[3]"
+                            : "opacity-30"
+                        }`}
+                      />
+                      <span>At least 1 number</span>
+                    </div>
+                    <div
+                      className={`flex items-center gap-1.5 ${
+                        passwordComplexity.hasSpecialChar
+                          ? "text-emerald-700 font-medium"
+                          : "text-neutral-500"
+                      }`}
+                    >
+                      <Check
+                        className={`w-3 h-3 ${
+                          passwordComplexity.hasSpecialChar
+                            ? "text-emerald-600 stroke-[3]"
+                            : "opacity-30"
+                        }`}
+                      />
+                      <span>Special character (!@#)</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Confirm Password Field (Required for New Customer) */}
+            {!isExistingAccount && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-neutral-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5 text-neutral-500" />
+                  <span>Confirm Password (Required)</span>
+                </label>
+                <div className="relative flex items-center">
+                  <Input
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={guestConfirmPassword}
+                    onChange={(e) => {
+                      setGuestConfirmPassword(e.target.value)
+                      if (guestErrors.confirmPassword)
+                        setGuestErrors({ ...guestErrors, confirmPassword: undefined })
+                    }}
+                    placeholder="Re-enter your password"
+                    className="pr-10 h-11 rounded-xl bg-white border-black/15 text-sm"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 text-neutral-400 hover:text-neutral-700 transition-colors"
+                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+                {guestErrors.confirmPassword ? (
+                  <p className="text-[11px] text-red-600 font-medium pl-1">
+                    {guestErrors.confirmPassword}
+                  </p>
+                ) : guestConfirmPassword.length > 0 && (
+                  <p
+                    className={`text-[11px] font-medium pl-1 ${
+                      guestPassword === guestConfirmPassword
+                        ? "text-emerald-600"
+                        : "text-amber-600"
+                    }`}
+                  >
+                    {guestPassword === guestConfirmPassword
+                      ? "✓ Passwords match"
+                      : "✕ Passwords do not match"}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Coupon Code Section inside Modal */}
             {!isFree && priceCents > 0 && (
@@ -615,7 +987,9 @@ export function CheckoutButton({
                     <div className="flex items-center gap-2">
                       <Tag className="w-3.5 h-3.5 text-emerald-600" />
                       <span className="font-bold font-mono uppercase">{appliedCoupon.code}</span>
-                      <span className="text-[11px] text-emerald-700">applied (-{appliedCoupon.savingsFormatted})</span>
+                      <span className="text-[11px] text-emerald-700">
+                        applied (-{appliedCoupon.savingsFormatted})
+                      </span>
                     </div>
                     <button
                       type="button"
@@ -648,11 +1022,17 @@ export function CheckoutButton({
                         size="sm"
                         className="h-10 px-3.5 rounded-xl text-xs font-bold bg-neutral-900 text-white hover:bg-neutral-800"
                       >
-                        {validatingCoupon ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Apply"}
+                        {validatingCoupon ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          "Apply"
+                        )}
                       </Button>
                     </div>
                     {couponError && (
-                      <p className="text-[11px] text-rose-600 font-medium pl-1 mt-1">{couponError}</p>
+                      <p className="text-[11px] text-rose-600 font-medium pl-1 mt-1">
+                        {couponError}
+                      </p>
                     )}
                   </div>
                 )}
@@ -662,8 +1042,12 @@ export function CheckoutButton({
             {/* Order Price Summary Box */}
             <div className="p-3.5 rounded-xl bg-neutral-100/80 border border-black/5 flex items-center justify-between text-xs">
               <div>
-                <div className="font-bold text-neutral-900 truncate max-w-[200px] sm:max-w-xs">{title}</div>
-                <div className="text-[11px] text-neutral-500">Digital eBook Edition • Lifetime Access</div>
+                <div className="font-bold text-neutral-900 truncate max-w-[200px] sm:max-w-xs">
+                  {title}
+                </div>
+                <div className="text-[11px] text-neutral-500">
+                  Digital eBook Edition • Lifetime Access
+                </div>
               </div>
               <div className="text-right">
                 <div className="font-bold text-sm text-neutral-900">
@@ -681,7 +1065,7 @@ export function CheckoutButton({
             <div className="pt-2 space-y-2">
               <Button
                 type="submit"
-                disabled={loading}
+                disabled={loading || accountState === "conflict"}
                 className="w-full h-12 rounded-full bg-[#111111] hover:bg-neutral-800 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
               >
                 {loading ? (
@@ -689,6 +1073,8 @@ export function CheckoutButton({
                     <Loader2 className="w-4 h-4 animate-spin" />
                     <span>Initiating Checkout...</span>
                   </>
+                ) : accountState === "conflict" ? (
+                  <span>Resolve Account Conflict</span>
                 ) : isFree || effectivePriceCents === 0 ? (
                   <span>Claim & Read for Free</span>
                 ) : (
@@ -717,7 +1103,8 @@ export function CheckoutButton({
               Payment Confirmed!
             </DialogTitle>
             <DialogDescription className="text-xs text-neutral-600 pt-1.5 leading-relaxed">
-              Your ebook <span className="font-semibold text-neutral-900">&quot;{title}&quot;</span> has been successfully added to your library.
+              Your ebook <span className="font-semibold text-neutral-900">&quot;{title}&quot;</span>{" "}
+              has been successfully added to your library.
             </DialogDescription>
           </DialogHeader>
 
@@ -725,8 +1112,14 @@ export function CheckoutButton({
           <div className="my-5 rounded-2xl bg-white border border-black/10 p-4 text-left space-y-2.5 shadow-sm text-xs">
             <div className="flex items-center justify-between pb-2 border-b border-black/5">
               <span className="font-semibold text-neutral-500">Account Access:</span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                {completedOrder?.isNewAccount ? "Auto-Created & Active" : "Linked to Existing Account"}
+              <span
+                className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                  completedOrder?.isNewAccount
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-blue-50 text-blue-700 border-blue-200"
+                }`}
+              >
+                {completedOrder?.isNewAccount ? "New Account Created" : "Linked to Existing Account"}
               </span>
             </div>
 
@@ -750,15 +1143,9 @@ export function CheckoutButton({
               </span>
             </div>
 
-            {completedOrder?.isNewAccount ? (
-              <p className="text-[11px] text-neutral-500 pt-1 leading-relaxed border-t border-black/5">
-                💡 Your account has been created and you are currently logged in. To access your library from any other device or computer later, simply sign in with your mobile number <strong>{completedOrder?.userPhone}</strong>.
-              </p>
-            ) : (
-              <p className="text-[11px] text-neutral-500 pt-1 leading-relaxed border-t border-black/5">
-                💡 This purchase was successfully linked to your existing account. Sign in with your mobile number <strong>{completedOrder?.userPhone}</strong> or email to access your library.
-              </p>
-            )}
+            <p className="text-[11px] text-neutral-600 pt-1.5 leading-relaxed border-t border-black/5">
+              Your account is ready. You can access your purchased books anytime by signing in with your mobile number and password.
+            </p>
           </div>
 
           {/* CTA Navigation Buttons */}
