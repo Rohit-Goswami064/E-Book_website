@@ -24,7 +24,9 @@ import {
   Pause,
   SkipBack,
   SkipForward,
+  Loader2,
 } from "lucide-react"
+import dynamic from "next/dynamic"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
@@ -32,7 +34,21 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
-import { PdfCanvasReader } from "./pdf-canvas-reader"
+
+const PdfCanvasReader = dynamic(
+  () => import("./pdf-canvas-reader").then((mod) => mod.PdfCanvasReader),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex flex-col items-center justify-center min-h-[500px] space-y-3">
+        <Loader2 className="w-8 h-8 animate-spin text-neutral-800" />
+        <p className="text-xs font-serif text-neutral-600 animate-pulse">
+          Loading reader...
+        </p>
+      </div>
+    ),
+  }
+)
 
 interface ReaderProps {
   book: {

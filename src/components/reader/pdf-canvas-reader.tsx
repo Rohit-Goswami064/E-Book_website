@@ -1,8 +1,17 @@
 "use client"
 
 import * as React from "react"
+import * as pdfjs from "pdfjs-dist"
 import { Loader2, AlertCircle, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
+
+// Configure PDF.js worker to be bundled by Webpack instead of fetched from /public
+if (typeof window !== "undefined") {
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+    "pdfjs-dist/build/pdf.worker.min.mjs",
+    import.meta.url
+  ).toString()
+}
 
 interface PdfCanvasReaderProps {
   streamUrl: string
@@ -127,16 +136,17 @@ export function PdfCanvasReader({
 
         if (isCancelled) return
 
-        // Step F: Dynamic import of pdfjs-dist on client
-        const pdfjsLib = await import("pdfjs-dist/build/pdf.mjs")
-
-        if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-          pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs"
+        // Step F: Ensure worker is configured using Webpack bundled asset
+        if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+          pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+            "pdfjs-dist/build/pdf.worker.min.mjs",
+            import.meta.url
+          ).toString()
         }
 
         // Feed decrypted Uint8Array directly into pdfjs.getDocument ({ data: decryptedData })
         // The raw PDF is never exposed to the Network tab or DOM
-        const loadingTask = pdfjsLib.getDocument({
+        const loadingTask = pdfjs.getDocument({
           data: decryptedData,
           cMapUrl: "https://unpkg.com/pdfjs-dist@4.10.38/cmaps/",
           cMapPacked: true,

@@ -7,7 +7,17 @@ import { applySecurityHeaders } from "@/lib/security/security-headers"
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
-  // 0. Binary upload endpoints bypass middleware body buffering so large files (up to 250MB) stream directly
+  // 0. Static assets, Next.js internal static files, and .mjs workers bypass middleware completely
+  if (
+    pathname.startsWith("/_next/static") ||
+    pathname.startsWith("/_next/image") ||
+    pathname.endsWith(".mjs") ||
+    pathname.endsWith(".wasm")
+  ) {
+    return NextResponse.next()
+  }
+
+  // Binary upload endpoints bypass middleware body buffering so large files (up to 250MB) stream directly
   if (pathname.includes("/publications/") && pathname.endsWith("/assets") && request.method === "POST") {
     return NextResponse.next()
   }
@@ -94,8 +104,8 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - api/admin/publications/:id/assets (large binary file streaming bypass)
-     * - public assets like .svg, .png, .jpg, .jpeg, .gif, .webp
+     * - public & bundled static assets (.mjs, .js, .css, .wasm, .svg, .png, .jpg, .jpeg, .gif, .webp, .ico, .woff, .woff2)
      */
-    "/((?!_next/static|_next/image|favicon.ico|api/admin/publications/[^/]+/assets|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/admin/publications/[^/]+/assets|.*\\.(?:svg|png|jpg|jpeg|gif|webp|mjs|js|css|wasm|ico|woff2?)$).*)",
   ],
 }
