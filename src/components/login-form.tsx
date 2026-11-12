@@ -121,18 +121,18 @@ export function LoginForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card className="rounded-2xl border-border shadow-sm">
-        <CardHeader>
-          <CardTitle className="text-2xl font-bold tracking-tight">Login</CardTitle>
-          <CardDescription>
+      <Card className="rounded-2xl border border-neutral-200/80 bg-white shadow-[0_4px_24px_-4px_rgba(0,0,0,0.06),0_2px_6px_-2px_rgba(0,0,0,0.04)] overflow-hidden">
+        <CardHeader className="px-6 pt-7 pb-4 sm:px-8 sm:pt-8 space-y-1.5">
+          <CardTitle className="text-2xl font-bold tracking-tight text-neutral-900">Login</CardTitle>
+          <CardDescription className="text-xs sm:text-sm text-neutral-500 leading-relaxed">
             Enter your email or mobile number below to access your account
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-6 pb-7 sm:px-8 sm:pb-8">
           <form onSubmit={handleLogin}>
             <div className="flex flex-col gap-5">
               <div className="grid gap-2">
-                <Label htmlFor="identifier" className="text-sm font-medium">
+                <Label htmlFor="identifier" className="text-xs sm:text-sm font-medium text-neutral-800">
                   Email or Mobile Number (Login ID)
                 </Label>
                 <Input
@@ -140,20 +140,21 @@ export function LoginForm({
                   type="text"
                   placeholder="name@example.com or 10-digit mobile (+91)"
                   required
+                  autoComplete="username"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="rounded-lg h-10 border-input bg-background px-3 text-sm focus-visible:ring-1 focus-visible:ring-ring"
+                  className="rounded-xl h-11 border-neutral-200 bg-neutral-50/50 hover:bg-white focus:bg-white px-3.5 text-base sm:text-sm text-neutral-900 placeholder:text-neutral-400 focus-visible:ring-1 focus-visible:ring-neutral-900 focus-visible:border-neutral-900 transition-all shadow-none"
                 />
               </div>
 
               <div className="grid gap-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="password" className="text-sm font-medium">
+                  <Label htmlFor="password" className="text-xs sm:text-sm font-medium text-neutral-800">
                     Password
                   </Label>
                   <Link
                     href="/forgot-password"
-                    className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4 transition-colors"
+                    className="text-xs font-medium text-neutral-600 hover:text-neutral-950 hover:underline underline-offset-4 transition-colors"
                   >
                     Forgot your password?
                   </Link>
@@ -164,14 +165,15 @@ export function LoginForm({
                     type={showPassword ? "text" : "password"}
                     placeholder="••••••••••••"
                     required
+                    autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="rounded-lg h-10 border-input bg-background pl-3 pr-10 text-sm focus-visible:ring-1 focus-visible:ring-ring"
+                    className="rounded-xl h-11 border-neutral-200 bg-neutral-50/50 hover:bg-white focus:bg-white pl-3.5 pr-11 text-base sm:text-sm text-neutral-900 placeholder:text-neutral-400 focus-visible:ring-1 focus-visible:ring-neutral-900 focus-visible:border-neutral-900 transition-all shadow-none"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 text-neutral-400 hover:text-neutral-700 transition-colors"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 rounded-lg flex items-center justify-center text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100/80 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-neutral-900"
                     aria-label={showPassword ? "Hide password" : "Show password"}
                   >
                     {showPassword ? (
@@ -186,7 +188,7 @@ export function LoginForm({
               <Button
                 type="submit"
                 disabled={loading}
-                className="w-full h-10 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-all shadow-sm"
+                className="w-full h-11 rounded-xl bg-neutral-900 hover:bg-black text-white font-medium text-sm transition-all shadow-sm active:scale-[0.99] disabled:opacity-70 disabled:pointer-events-none mt-1"
               >
                 {loading ? (
                   <>
@@ -199,11 +201,11 @@ export function LoginForm({
               </Button>
             </div>
 
-            <div className="mt-5 text-center text-sm text-muted-foreground">
+            <div className="mt-6 text-center text-xs sm:text-sm text-neutral-600">
               Don&apos;t have an account?{" "}
               <Link
                 href={`/register?redirect=${encodeURIComponent(redirect)}`}
-                className="text-foreground font-medium underline underline-offset-4 hover:text-primary transition-colors"
+                className="text-neutral-950 font-semibold underline underline-offset-4 hover:text-black transition-colors"
               >
                 Sign up
               </Link>

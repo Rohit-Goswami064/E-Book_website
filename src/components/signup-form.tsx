@@ -72,35 +72,35 @@ export function SignupForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card className="rounded-2xl border-border shadow-sm">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold tracking-tight">
+      <Card className="rounded-2xl border border-neutral-200/80 bg-white shadow-[0_4px_24px_-4px_rgba(0,0,0,0.06),0_2px_6px_-2px_rgba(0,0,0,0.04)] overflow-hidden">
+        <CardHeader className="px-6 pt-7 pb-4 sm:px-8 sm:pt-8 space-y-1.5">
+          <CardTitle className="text-2xl font-bold tracking-tight text-neutral-900">
             Create an account
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-xs sm:text-sm text-neutral-500 leading-relaxed">
             Enter your details below to create your reader account
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-6 pb-7 sm:px-8 sm:pb-8">
           <form onSubmit={handleRegister}>
             <div className="flex flex-col gap-5">
               <div className="grid gap-2">
-                <Label htmlFor="fullName" className="text-sm font-medium">
+                <Label htmlFor="fullName" className="text-xs sm:text-sm font-medium text-neutral-800">
                   Full Name
                 </Label>
                 <Input
                   id="fullName"
                   type="text"
-                  placeholder="Marcus Aurelius"
+                  placeholder="Roshan Pandey"
                   required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  className="rounded-lg h-10 border-input bg-background px-3 text-sm focus-visible:ring-1 focus-visible:ring-ring"
+                  className="rounded-xl h-11 border-neutral-200 bg-neutral-50/50 hover:bg-white focus:bg-white px-3.5 text-base sm:text-sm text-neutral-900 placeholder:text-neutral-400 focus-visible:ring-1 focus-visible:ring-neutral-900 focus-visible:border-neutral-900 transition-all shadow-none"
                 />
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="email" className="text-sm font-medium">
+                <Label htmlFor="email" className="text-xs sm:text-sm font-medium text-neutral-800">
                   Email Address
                 </Label>
                 <Input
@@ -108,14 +108,15 @@ export function SignupForm({
                   type="email"
                   placeholder="reader@example.com"
                   required
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="rounded-lg h-10 border-input bg-background px-3 text-sm focus-visible:ring-1 focus-visible:ring-ring"
+                  className="rounded-xl h-11 border-neutral-200 bg-neutral-50/50 hover:bg-white focus:bg-white px-3.5 text-base sm:text-sm text-neutral-900 placeholder:text-neutral-400 focus-visible:ring-1 focus-visible:ring-neutral-900 focus-visible:border-neutral-900 transition-all shadow-none"
                 />
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="password" className="text-sm font-medium">
+                <Label htmlFor="password" className="text-xs sm:text-sm font-medium text-neutral-800">
                   Password
                 </Label>
                 <Input
@@ -124,11 +125,12 @@ export function SignupForm({
                   required
                   minLength={6}
                   placeholder="••••••••••••"
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="rounded-lg h-10 border-input bg-background px-3 text-sm focus-visible:ring-1 focus-visible:ring-ring"
+                  className="rounded-xl h-11 border-neutral-200 bg-neutral-50/50 hover:bg-white focus:bg-white px-3.5 text-base sm:text-sm text-neutral-900 placeholder:text-neutral-400 focus-visible:ring-1 focus-visible:ring-neutral-900 focus-visible:border-neutral-900 transition-all shadow-none"
                 />
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-neutral-500">
                   Must be at least 6 characters long.
                 </p>
               </div>
@@ -136,7 +138,7 @@ export function SignupForm({
               <Button
                 type="submit"
                 disabled={loading}
-                className="w-full h-10 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-all shadow-sm"
+                className="w-full h-11 rounded-xl bg-neutral-900 hover:bg-black text-white font-medium text-sm transition-all shadow-sm active:scale-[0.99] disabled:opacity-70 disabled:pointer-events-none mt-1"
               >
                 {loading ? (
                   <>
@@ -149,11 +151,11 @@ export function SignupForm({
               </Button>
             </div>
 
-            <div className="mt-5 text-center text-sm text-muted-foreground">
+            <div className="mt-6 text-center text-xs sm:text-sm text-neutral-600">
               Already have an account?{" "}
               <Link
                 href={`/login?redirect=${encodeURIComponent(redirect)}`}
-                className="text-foreground font-medium underline underline-offset-4 hover:text-primary transition-colors"
+                className="text-neutral-950 font-semibold underline underline-offset-4 hover:text-black transition-colors"
               >
                 Sign in
               </Link>
@@ -162,13 +164,13 @@ export function SignupForm({
         </CardContent>
       </Card>
 
-      <div className="text-center text-xs text-muted-foreground text-balance">
+      <div className="text-center text-xs text-neutral-500 text-balance">
         By continuing, you agree to our{" "}
-        <Link href="/terms" className="underline underline-offset-4 hover:text-foreground">
+        <Link href="/terms" className="underline underline-offset-4 hover:text-neutral-900 transition-colors">
           Terms of Service
         </Link>{" "}
         and{" "}
-        <Link href="/privacy" className="underline underline-offset-4 hover:text-foreground">
+        <Link href="/privacy" className="underline underline-offset-4 hover:text-neutral-900 transition-colors">
           Privacy Policy
         </Link>
         .
