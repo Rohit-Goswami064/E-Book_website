@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Home, Grid3X3, Library, User } from "lucide-react"
+import { Home, Grid3X3, Library, Newspaper, User } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export function MobileBottomNav() {
@@ -18,6 +18,7 @@ export function MobileBottomNav() {
     { label: "Home", href: "/", icon: Home, exact: true },
     { label: "Browse", href: "/books", icon: Grid3X3, exact: false },
     { label: "Library", href: "/account/library", icon: Library, exact: false },
+    { label: "Blog", href: "/blog", icon: Newspaper, exact: false },
     { label: "Profile", href: "/account", icon: User, exact: false },
   ]
 
@@ -32,7 +33,7 @@ export function MobileBottomNav() {
           <Link
             key={item.label}
             href={item.href}
-            className="flex flex-col items-center gap-1 min-w-[64px] py-1 transition-transform active:scale-95"
+            className="flex flex-col items-center gap-1 min-w-[52px] sm:min-w-[60px] py-1 transition-transform active:scale-95"
           >
             <div
               className={cn(

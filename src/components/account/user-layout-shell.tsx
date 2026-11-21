@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
+import { SetPasswordDialog } from "./set-password-dialog"
 
 interface UserLayoutShellProps {
   user: {
@@ -34,6 +35,8 @@ interface UserLayoutShellProps {
   }
   libraryCount?: number
   orderCount?: number
+  isTempPassword?: boolean
+  userPhone?: string | null
   children: React.ReactNode
 }
 
@@ -41,6 +44,8 @@ export function UserLayoutShell({
   user,
   libraryCount = 0,
   orderCount = 0,
+  isTempPassword = false,
+  userPhone,
   children,
 }: UserLayoutShellProps) {
   const pathname = usePathname()
@@ -409,6 +414,8 @@ export function UserLayoutShell({
           </div>
         </main>
       </div>
+
+      <SetPasswordDialog isTempPassword={isTempPassword} userPhone={userPhone} />
     </div>
   )
 }

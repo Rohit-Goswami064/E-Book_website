@@ -357,6 +357,8 @@ export default async function BookDetailPage({ params }: BookPageProps) {
                 isEntitled={isEntitled}
                 userEmail={user?.email}
                 userName={user?.user_metadata?.full_name}
+                userPhone={user?.user_metadata?.phone || (user as any)?.phone || null}
+                coverImageUrl={book.cover_image_url}
               />
             </div>
 

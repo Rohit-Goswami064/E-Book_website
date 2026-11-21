@@ -8,6 +8,7 @@ import {
   updateCustomerPassword,
   provisionNewCustomer,
 } from "@/lib/auth/checkout-customer"
+import { getOrCreatePasswordlessCustomer } from "@/lib/auth/passwordless-customer"
 import {
   normalizeIndianMobile,
   validatePasswordComplexity,
@@ -19,12 +20,16 @@ export const dynamic = "force-dynamic"
 const createOrderSchema = z.object({
   bookId: z.string().uuid("Invalid book identifier"),
   couponCode: z.string().optional().nullable(),
+  customerName: z.string().optional().nullable(),
+  customerEmail: z.string().optional().nullable(),
+  customerMobile: z.string().optional().nullable(),
+  customerPhone: z.string().optional().nullable(),
   guestDetails: z
     .object({
-      fullName: z.string().min(2, "Please enter your full name (at least 2 characters)"),
-      mobile: z.string().min(10, "Please enter a valid 10-digit mobile number"),
-      email: z.string().email("Please provide a valid email address"),
-      password: z.string().min(1, "Password is required"),
+      fullName: z.string().optional().nullable(),
+      mobile: z.string().optional().nullable(),
+      email: z.string().optional().nullable(),
+      password: z.string().optional().nullable(),
       confirmPassword: z.string().optional().nullable(),
     })
     .optional()
@@ -44,7 +49,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { bookId, couponCode, guestDetails } = parsed.data
+    const {
+      bookId,
+      couponCode,
+      customerName: rawNameInput,
+      customerEmail: rawEmailInput,
+      customerMobile: rawMobileInput,
+      customerPhone: rawPhoneInput,
+      guestDetails,
+    } = parsed.data
     const supabase = await createClient()
 
     // 1. Authoritative User Resolution & Account Authentication
@@ -63,124 +76,40 @@ export async function POST(request: NextRequest) {
       customerPhone = user.user_metadata?.phone || null
       isNewAccount = false
     } else {
-      // Instant Checkout Customer Flow
-      if (!guestDetails) {
+      // Express Checkout Customer Flow (Requires valid mobile number or email)
+      const targetMobile = rawMobileInput || rawPhoneInput || guestDetails?.mobile || null
+      const targetEmail = rawEmailInput || guestDetails?.email || null
+      const targetName = rawNameInput || guestDetails?.fullName || null
+
+      if (!targetMobile && !targetEmail) {
         return NextResponse.json(
-          { error: "Customer details including mobile number, email, and password are required." },
+          { error: "A valid mobile number is required to complete your purchase." },
           { status: 400 }
         )
       }
 
-      // A. Normalize contact information
-      const cleanMobile = normalizeIndianMobile(guestDetails.mobile)
-      if (!cleanMobile) {
-        return NextResponse.json(
-          { error: "Please enter a valid 10-digit Indian mobile number." },
-          { status: 400 }
-        )
-      }
-
-      customerEmail = guestDetails.email.trim().toLowerCase()
-      customerName = guestDetails.fullName.trim()
-      customerPhone = cleanMobile
-
-      // B. Authoritative check for existing accounts & account conflict detection
-      const accountCheck = await checkCustomerAccount(customerEmail, cleanMobile)
-
-      if (accountCheck.conflict) {
-        return NextResponse.json(
-          {
-            error:
-              accountCheck.conflictError ||
-              "Account Conflict: The provided mobile number and email address belong to two different accounts. Please use matching credentials or sign in before checking out.",
-            conflict: true,
-          },
-          { status: 400 }
-        )
-      }
-
-      if (accountCheck.exists && accountCheck.userId) {
-        // C. Existing Customer Workflow
-        if (accountCheck.hasPassword) {
-          // Require password verification for existing account ownership
-          const isPasswordValid = await verifyExistingUserPassword(
-            accountCheck.userId,
-            guestDetails.password
-          )
-
-          if (!isPasswordValid) {
-            return NextResponse.json(
-              {
-                error:
-                  "Incorrect password for this account. Please enter your valid password to authenticate and link this purchase.",
-                isExistingAccount: true,
-              },
-              { status: 401 }
-            )
-          }
-
-          resolvedUserId = accountCheck.userId
-          customerEmail = accountCheck.email || customerEmail
-          customerPhone = accountCheck.phone || cleanMobile
-          customerName = customerName || accountCheck.fullName || "Customer"
-          isNewAccount = false
-        } else {
-          // Legacy account without password: Set password securely
-          const complexity = validatePasswordComplexity(guestDetails.password)
-          if (!complexity.valid) {
-            return NextResponse.json(
-              { error: complexity.errors[0], details: complexity.errors },
-              { status: 400 }
-            )
-          }
-
-          if (
-            guestDetails.confirmPassword &&
-            guestDetails.password !== guestDetails.confirmPassword
-          ) {
-            return NextResponse.json(
-              { error: "Password and Confirm Password do not match." },
-              { status: 400 }
-            )
-          }
-
-          await updateCustomerPassword(accountCheck.userId, guestDetails.password)
-          resolvedUserId = accountCheck.userId
-          customerEmail = accountCheck.email || customerEmail
-          customerPhone = accountCheck.phone || cleanMobile
-          customerName = customerName || accountCheck.fullName || "Customer"
-          isNewAccount = false
-        }
-      } else {
-        // D. New Customer Workflow: Validate complexity & confirm match
-        const complexity = validatePasswordComplexity(guestDetails.password)
-        if (!complexity.valid) {
+      if (targetMobile) {
+        const cleanMob = normalizeIndianMobile(targetMobile)
+        if (!cleanMob) {
           return NextResponse.json(
-            { error: complexity.errors[0], details: complexity.errors },
+            { error: "Please enter a valid 10-digit Indian mobile number." },
             { status: 400 }
           )
         }
-
-        if (guestDetails.password !== guestDetails.confirmPassword) {
-          return NextResponse.json(
-            { error: "Password and Confirm Password do not match. Please re-enter your confirm password." },
-            { status: 400 }
-          )
-        }
-
-        // Provision new customer in auth.users with bcrypt blowfish hash
-        const newCustomer = await provisionNewCustomer({
-          email: customerEmail,
-          phone: cleanMobile,
-          fullName: customerName,
-          password: guestDetails.password,
-        })
-
-        resolvedUserId = newCustomer.userId
-        isNewAccount = true
-        customerEmail = newCustomer.email
-        customerPhone = newCustomer.phone
       }
+
+      // Passwordless customer provisioning & resolution
+      const customer = await getOrCreatePasswordlessCustomer({
+        phone: targetMobile,
+        email: targetEmail,
+        fullName: targetName,
+      })
+
+      resolvedUserId = customer.userId
+      customerEmail = customer.email
+      customerName = customer.fullName
+      customerPhone = customer.phone
+      isNewAccount = customer.isNewAccount
     }
 
     // 2. Fetch authoritative book record from database

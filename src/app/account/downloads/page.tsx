@@ -38,7 +38,7 @@ export default async function DownloadsPage() {
       entitlementId: e.id,
       grantedAt: e.granted_at,
       book: e.books,
-      file: (e.books?.book_files as any[])?.find((f) => f.file_type === "pdf" && f.is_downloadable),
+      file: (e.books?.book_files as any[])?.find((f) => f.file_type === "pdf"),
     }))
     .filter((item) => item.book)
 
@@ -83,7 +83,7 @@ export default async function DownloadsPage() {
                 </div>
               </div>
 
-              <DownloadAction bookId={book.id} isDownloadable={!!file} />
+              <DownloadAction bookId={book.id} isDownloadable={true} />
             </div>
           ))}
         </div>

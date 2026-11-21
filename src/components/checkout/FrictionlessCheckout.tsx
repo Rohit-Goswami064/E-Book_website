@@ -4,11 +4,11 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Loader2, Mail, Lock, ShieldCheck, ArrowRight, BookOpen, Tag, X, User, Phone, Eye, EyeOff, KeyRound } from "lucide-react"
+import { Loader2, Phone, ArrowRight, BookOpen, Tag, X, User } from "lucide-react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { formatCurrency } from "@/lib/utils"
-import { normalizeIndianMobile, validatePasswordComplexity } from "@/lib/auth/mobile-normalizer"
+import { normalizeIndianMobile } from "@/lib/auth/mobile-normalizer"
 
 declare global {
   interface Window {
@@ -18,10 +18,10 @@ declare global {
 
 export interface FrictionlessCheckoutProps {
   bookId: string
-  price: number // in cents/paise or standard units (e.g. 249 or 24900)
+  price: number
   bookTitle?: string
   currency?: string
-  initialEmail?: string
+  initialMobile?: string
   className?: string
   onSuccess?: (orderId: string) => void
 }
@@ -34,9 +34,6 @@ type CheckoutStage =
   | "authenticating"
   | "redirecting"
 
-/**
- * Dynamically loads the Razorpay checkout.js script if not already present in the DOM.
- */
 function loadRazorpayScript(): Promise<boolean> {
   return new Promise((resolve) => {
     if (typeof window === "undefined") {
@@ -81,23 +78,21 @@ export function FrictionlessCheckout({
   price,
   bookTitle = "eBook",
   currency = "INR",
-  initialEmail = "",
+  initialMobile = "",
   className = "",
   onSuccess,
 }: FrictionlessCheckoutProps) {
   const router = useRouter()
-  const [fullName, setFullName] = React.useState("")
-  const [mobile, setMobile] = React.useState("")
-  const [email, setEmail] = React.useState(initialEmail)
-  const [password, setPassword] = React.useState("")
-  const [confirmPassword, setConfirmPassword] = React.useState("")
-  const [showPassword, setShowPassword] = React.useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = React.useState(false)
+  const [name, setName] = React.useState("")
+  const [mobile, setMobile] = React.useState(initialMobile)
+  const [isAuthenticated, setIsAuthenticated] = React.useState(false)
+  const [userDisplay, setUserDisplay] = React.useState<string>("")
 
   const [loadingStage, setLoadingStage] = React.useState<CheckoutStage>("idle")
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
 
-  // Coupon state
+  // Collapsible coupon state
+  const [isCouponExpanded, setIsCouponExpanded] = React.useState(false)
   const [couponInput, setCouponInput] = React.useState("")
   const [appliedCoupon, setAppliedCoupon] = React.useState<{
     code: string
@@ -132,6 +127,7 @@ export function FrictionlessCheckout({
           savingsFormatted: data.savingsFormatted,
         })
         setCouponInput("")
+        setIsCouponExpanded(false)
         toast.success(data.message || `Coupon "${data.code}" applied!`)
       } else {
         setCouponError(data.error || "Invalid coupon code.")
@@ -153,84 +149,70 @@ export function FrictionlessCheckout({
 
   const isLoading = loadingStage !== "idle"
 
-  // Pre-load Razorpay SDK script on component mount
   React.useEffect(() => {
     loadRazorpayScript().catch(() => {})
   }, [])
 
-  // Auto-fill logged in user email if available
+  // Auto-fill logged in user info if available
   React.useEffect(() => {
-    if (initialEmail) return
     const supabase = createClient()
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user?.email) {
-        setEmail(user.email)
-        if (user.user_metadata?.full_name) setFullName(user.user_metadata.full_name)
-        if (user.user_metadata?.phone) setMobile(user.user_metadata.phone)
-      }
-    }).catch(() => {})
-  }, [initialEmail])
+    supabase.auth
+      .getUser()
+      .then(({ data: { user } }) => {
+        if (user) {
+          setIsAuthenticated(true)
+          const phone = user.user_metadata?.phone || (user as any).phone
+          if (phone) {
+            setMobile(phone)
+            setUserDisplay(`+91 ${phone}`)
+          } else if (user.email) {
+            setUserDisplay(user.email)
+          }
+        }
+      })
+      .catch(() => {})
+  }, [])
 
-  // Price formatting helper
   const effectivePrice = appliedCoupon ? appliedCoupon.finalPriceCents : price
   const displayPrice = React.useMemo(() => {
     if (effectivePrice === 0) return "Free"
-    const amountInPaise = effectivePrice < 1000 && Number.isInteger(effectivePrice) ? effectivePrice * 100 : effectivePrice
+    const amountInPaise =
+      effectivePrice < 1000 && Number.isInteger(effectivePrice) ? effectivePrice * 100 : effectivePrice
     return formatCurrency(amountInPaise, currency)
   }, [effectivePrice, currency])
 
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    const cleanEmail = email.trim().toLowerCase()
-    const cleanMobile = normalizeIndianMobile(mobile)
-    const cleanName = fullName.trim()
-
-    if (!cleanName || cleanName.length < 2) {
-      setErrorMessage("Please enter your full name.")
-      return
-    }
-
-    if (!cleanMobile) {
-      setErrorMessage("Please enter a valid 10-digit Indian mobile number.")
-      return
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
-      setErrorMessage("Please enter a valid email address.")
-      return
-    }
-
-    const complexity = validatePasswordComplexity(password)
-    if (!complexity.valid) {
-      setErrorMessage(complexity.errors[0] || "Password must be at least 8 characters with upper, lower, number and special char.")
-      return
-    }
-
-    if (confirmPassword && password !== confirmPassword) {
-      setErrorMessage("Passwords do not match.")
-      return
+    const cleanMobile = mobile.replace(/\D/g, "")
+    const cleanName = name.trim()
+    if (!isAuthenticated) {
+      if (!cleanName || cleanName.length < 2) {
+        setErrorMessage("Please enter your full name.")
+        return
+      }
+      if (!cleanMobile || cleanMobile.length !== 10) {
+        setErrorMessage("Please enter a valid 10-digit Indian mobile number.")
+        return
+      }
+      if (!/^[5-9]\d{9}$/.test(cleanMobile)) {
+        setErrorMessage("Please enter a valid mobile number starting with 6, 7, 8, or 9.")
+        return
+      }
     }
 
     setErrorMessage(null)
     setLoadingStage("initiating")
 
     try {
-      // 1. Create order on backend
       const orderRes = await fetch("/api/checkout/create-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           bookId,
           couponCode: appliedCoupon?.code || null,
-          guestDetails: {
-            fullName: cleanName,
-            mobile: cleanMobile,
-            email: cleanEmail,
-            password: password,
-            confirmPassword: confirmPassword || password,
-          },
+          customerName: cleanName || undefined,
+          customerMobile: cleanMobile || undefined,
         }),
       })
 
@@ -240,7 +222,6 @@ export function FrictionlessCheckout({
         throw new Error(orderData.error || "Failed to initiate order. Please try again.")
       }
 
-      // 2. If the book is free (or 100% discounted)
       if (orderData.isFree) {
         setLoadingStage("redirecting")
         toast.success(orderData.message || "Book successfully added to your library!")
@@ -249,7 +230,6 @@ export function FrictionlessCheckout({
         return
       }
 
-      // 3. Ensure Razorpay Checkout SDK is ready
       let isSdkReady = !!window.Razorpay
       if (!isSdkReady) {
         isSdkReady = await loadRazorpayScript()
@@ -263,7 +243,6 @@ export function FrictionlessCheckout({
         throw new Error("Payment gateway configuration missing. Please contact support.")
       }
 
-      // 4. Configure Razorpay modal
       setLoadingStage("awaiting_payment")
 
       const options = {
@@ -274,9 +253,9 @@ export function FrictionlessCheckout({
         description: `Access to ${orderData.bookTitle || bookTitle}`,
         order_id: orderData.razorpayOrderId,
         prefill: {
-          email: cleanEmail,
-          name: cleanName,
-          contact: cleanMobile,
+          contact: orderData.userPhone || cleanMobile || "",
+          email: orderData.userEmail || (cleanMobile ? `${cleanMobile}@hiddenbooks.in` : ""),
+          name: orderData.userName || "",
         },
         theme: {
           color: "#111111",
@@ -295,7 +274,6 @@ export function FrictionlessCheckout({
           setLoadingStage("verifying")
 
           try {
-            // 5. Send payment signatures to backend for cryptographic verification & entitlement grant
             const verifyRes = await fetch("/api/checkout/verify-payment", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -312,21 +290,36 @@ export function FrictionlessCheckout({
               throw new Error(verifyData.error || "Payment verification failed. Please contact support.")
             }
 
-            // Client authentication
-            try {
-              const supabase = createClient()
-              await supabase.auth.signInWithPassword({
-                email: cleanEmail,
-                password: password,
-              })
-            } catch {}
+            const phonePassword = cleanMobile || verifyData.customerPhone
+            const targetEmail = verifyData.customerEmail || (phonePassword ? `${phonePassword}@hiddenbooks.in` : null)
+            let sessionReady = false
 
-            // 7. Instant Reader Handoff
+            if (targetEmail && phonePassword) {
+              try {
+                const supabase = createClient()
+                const { error: signInErr } = await supabase.auth.signInWithPassword({
+                  email: targetEmail,
+                  password: phonePassword,
+                })
+                if (!signInErr) sessionReady = true
+              } catch {}
+            }
+
+            if (!sessionReady && verifyData.autoLoginToken) {
+              try {
+                const supabase = createClient()
+                await supabase.auth.verifyOtp({
+                  token_hash: verifyData.autoLoginToken,
+                  type: "magiclink",
+                })
+              } catch {}
+            }
+
             setLoadingStage("redirecting")
-            toast.success("Payment confirmed! Opening your book...")
+            toast.success("Payment confirmed! Redirecting to your dashboard...")
             if (onSuccess) onSuccess(verifyData.orderId)
 
-            router.push(`/read/${bookId}`)
+            window.location.href = "/account/downloads?setup_password=1"
           } catch (verifyErr: any) {
             console.error("[Verification Handler Error]:", verifyErr)
             setErrorMessage(verifyErr?.message || "Failed to verify payment.")
@@ -353,7 +346,6 @@ export function FrictionlessCheckout({
     }
   }
 
-  // Dynamic status text for button
   const getButtonText = () => {
     switch (loadingStage) {
       case "initiating":
@@ -374,127 +366,95 @@ export function FrictionlessCheckout({
   return (
     <div className={`w-full max-w-md mx-auto ${className}`}>
       <form onSubmit={handleCheckout} className="space-y-4">
-        {/* Full Name */}
-        <div className="space-y-1.5 text-left">
-          <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-            Full Name
-          </label>
-          <div className="relative">
-            <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
-            <Input
-              type="text"
-              required
-              disabled={isLoading}
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              placeholder="Rahul Sharma"
-              className="pl-10 h-11 bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 rounded-xl text-sm"
-            />
-          </div>
-        </div>
-
-        {/* Mobile Number */}
-        <div className="space-y-1.5 text-left">
-          <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-            Mobile Number (Login ID)
-          </label>
-          <div className="relative flex items-center">
-            <span className="absolute left-3 text-xs font-semibold text-neutral-500 select-none">
-              +91
+        {/* Delivery to Active User or Mobile Number Input */}
+        {isAuthenticated ? (
+          <div className="p-3 rounded-2xl bg-white border border-neutral-200 dark:border-neutral-800 flex items-center justify-between text-xs shadow-sm">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-7 h-7 rounded-full bg-neutral-100 flex items-center justify-center flex-shrink-0 text-neutral-700">
+                <User className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase font-bold tracking-wider text-neutral-400">
+                  Delivering to
+                </p>
+                <p className="font-medium text-neutral-900 truncate">{userDisplay}</p>
+              </div>
+            </div>
+            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold text-[10px] border border-emerald-200/80 flex-shrink-0">
+              Account Active
             </span>
-            <Input
-              type="tel"
-              maxLength={10}
-              required
-              disabled={isLoading}
-              value={mobile}
-              onChange={(e) => setMobile(e.target.value.replace(/\D/g, ""))}
-              placeholder="9876543210"
-              className="pl-11 h-11 bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 rounded-xl text-sm font-mono"
-            />
           </div>
-        </div>
+        ) : (
+          <div className="space-y-3">
+            {/* Full Name */}
+            <div className="space-y-1.5 text-left">
+              <label htmlFor="checkout-name" className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                Full Name
+              </label>
+              <div className="relative">
+                <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400 pointer-events-none" />
+                <Input
+                  id="checkout-name"
+                  type="text"
+                  required
+                  disabled={isLoading}
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value)
+                    if (errorMessage) setErrorMessage(null)
+                  }}
+                  placeholder="e.g. Rahul Sharma"
+                  className="pl-10 h-11 bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 rounded-xl text-sm"
+                />
+              </div>
+            </div>
 
-        {/* Email */}
-        <div className="space-y-1.5 text-left">
-          <label htmlFor="checkout-email" className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-            Email for eBook Access
-          </label>
-          <div className="relative">
-            <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
-            <Input
-              id="checkout-email"
-              type="email"
-              required
-              disabled={isLoading}
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value)
-                if (errorMessage) setErrorMessage(null)
-              }}
-              placeholder="you@example.com"
-              className="pl-10 h-11 bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 rounded-xl text-sm"
-            />
+            {/* Mobile Number */}
+            <div className="space-y-1.5 text-left">
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="checkout-mobile"
+                  className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300"
+                >
+                  Mobile Number
+                </label>
+                <span className="text-[11px] text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded-full">
+                  No password required
+                </span>
+              </div>
+              <div className="relative flex items-center">
+                <span className="absolute left-3 text-xs font-semibold text-neutral-600 select-none flex items-center gap-1.5 pointer-events-none">
+                  <Phone className="w-3.5 h-3.5 text-neutral-400" />
+                  <span>+91</span>
+                  <span className="text-neutral-300">|</span>
+                </span>
+                <Input
+                  id="checkout-mobile"
+                  type="tel"
+                  maxLength={10}
+                  required
+                  disabled={isLoading}
+                  value={mobile}
+                  onChange={(e) => {
+                    setMobile(e.target.value.replace(/\D/g, ""))
+                    if (errorMessage) setErrorMessage(null)
+                  }}
+                  placeholder="9876543210"
+                  className="pl-18 h-11 bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 rounded-xl text-sm font-mono tracking-wider"
+                />
+              </div>
+              <p className="text-[11px] text-neutral-500 pl-1">
+                Your purchase receipt and instant eBook library link will be linked to this number.
+              </p>
+            </div>
           </div>
-        </div>
-
-        {/* Password */}
-        <div className="space-y-1.5 text-left">
-          <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-            Password (Required)
-          </label>
-          <div className="relative">
-            <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
-            <Input
-              type={showPassword ? "text" : "password"}
-              required
-              disabled={isLoading}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Min 8 characters (Upper, lower, digit, symbol)"
-              className="pl-10 pr-10 h-11 bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 rounded-xl text-sm"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700"
-            >
-              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
-          </div>
-        </div>
-
-        {/* Confirm Password */}
-        <div className="space-y-1.5 text-left">
-          <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-            Confirm Password
-          </label>
-          <div className="relative">
-            <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
-            <Input
-              type={showConfirmPassword ? "text" : "password"}
-              required
-              disabled={isLoading}
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Re-enter password"
-              className="pl-10 pr-10 h-11 bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 rounded-xl text-sm"
-            />
-            <button
-              type="button"
-              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700"
-            >
-              {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
-          </div>
-        </div>
+        )}
 
         {errorMessage && (
           <p className="text-xs text-rose-500 font-medium text-left">{errorMessage}</p>
         )}
 
-        {/* Coupon Code Section */}
+        {/* Collapsible Coupon Code Section */}
         {price > 0 && (
           <div className="space-y-1.5 text-left">
             {appliedCoupon ? (
@@ -502,7 +462,9 @@ export function FrictionlessCheckout({
                 <div className="flex items-center gap-2">
                   <Tag className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                   <span className="font-bold font-mono uppercase">{appliedCoupon.code}</span>
-                  <span className="text-[11px] text-emerald-700 dark:text-emerald-400">applied (-{appliedCoupon.savingsFormatted})</span>
+                  <span className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                    applied (-{appliedCoupon.savingsFormatted})
+                  </span>
                 </div>
                 <button
                   type="button"
@@ -512,8 +474,33 @@ export function FrictionlessCheckout({
                   Remove
                 </button>
               </div>
+            ) : !isCouponExpanded ? (
+              <button
+                type="button"
+                onClick={() => setIsCouponExpanded(true)}
+                className="text-xs font-semibold text-neutral-600 hover:text-neutral-900 flex items-center gap-1.5 transition-colors group py-1"
+              >
+                <Tag className="w-3.5 h-3.5 text-neutral-400 group-hover:text-neutral-700 transition" />
+                <span className="underline-offset-2 hover:underline">+ Have a coupon code?</span>
+              </button>
             ) : (
-              <div>
+              <div className="p-3 rounded-2xl bg-white border border-neutral-200 space-y-2.5 shadow-sm">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-neutral-700 flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5 text-neutral-500" />
+                    <span>Apply Coupon</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCouponExpanded(false)
+                      setCouponError(null)
+                    }}
+                    className="text-neutral-400 hover:text-neutral-700 p-0.5 rounded"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1">
                     <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
@@ -525,7 +512,7 @@ export function FrictionlessCheckout({
                         setCouponInput(e.target.value.toUpperCase())
                         if (couponError) setCouponError(null)
                       }}
-                      placeholder="Coupon Code (e.g. WELCOME10)"
+                      placeholder="Coupon Code"
                       className="pl-9 h-10 rounded-xl bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-xs uppercase font-mono"
                     />
                   </div>
@@ -560,17 +547,12 @@ export function FrictionlessCheckout({
             </>
           ) : (
             <>
-              <Lock className="w-4 h-4" />
+              <BookOpen className="w-4 h-4" />
               <span>{getButtonText()}</span>
               <ArrowRight className="w-4 h-4 ml-auto" />
             </>
           )}
         </Button>
-
-        <div className="flex items-center justify-center gap-1.5 text-[11px] text-neutral-500 dark:text-neutral-400 pt-1">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-          <span>100% Secure Razorpay Checkout • SSL Encrypted</span>
-        </div>
       </form>
     </div>
   )

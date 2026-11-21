@@ -46,6 +46,9 @@ export default async function AccountLayout({
     .eq("user_id", user.id)
 
   const displayName = profile?.full_name || user.user_metadata?.full_name || "Reader"
+  const userMetadata = user.user_metadata || {}
+  const phone = profile?.phone || userMetadata.phone || null
+  const isTempPassword = Boolean(userMetadata.is_temp_password)
 
   return (
     <UserLayoutShell
@@ -57,6 +60,8 @@ export default async function AccountLayout({
       }}
       libraryCount={libraryCount || 0}
       orderCount={orderCount || 0}
+      isTempPassword={isTempPassword}
+      userPhone={phone}
     >
       {children}
     </UserLayoutShell>

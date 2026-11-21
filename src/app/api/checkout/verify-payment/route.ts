@@ -3,6 +3,8 @@ import { getCurrentUser } from "@/lib/auth/roles"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { verifyPaymentSignature, getRazorpayClient } from "@/lib/razorpay/client"
+import { dbQuery } from "@/lib/db"
+import { normalizeIndianMobile } from "@/lib/auth/mobile-normalizer"
 import { z } from "zod"
 
 export const dynamic = "force-dynamic"
@@ -145,7 +147,68 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 6. Frictionless Guest Auto-Login Handoff & Magic Link Provisioning
+    // 6. Guarantee temporary password as mobile number in auth.users
+    const rawCustomerPhone = result.customer_phone || (activeUser?.user_metadata?.phone)
+    const cleanCustomerPhone = rawCustomerPhone ? normalizeIndianMobile(rawCustomerPhone) : null
+    const finalEmail = result.customer_email || (cleanCustomerPhone ? `${cleanCustomerPhone}@hiddenbooks.in` : null)
+
+    if (result.user_id && cleanCustomerPhone) {
+      try {
+        await dbQuery(
+          `
+          UPDATE auth.users 
+          SET 
+            encrypted_password = extensions.crypt($1::text, extensions.gen_salt('bf', 10)),
+            raw_user_meta_data = jsonb_set(
+              COALESCE(raw_user_meta_data, '{}'::jsonb),
+              '{is_temp_password}',
+              'true'::jsonb
+            ),
+            updated_at = now()
+          WHERE id = $2::uuid;
+          `,
+          [cleanCustomerPhone, result.user_id]
+        )
+
+        // Ensure email provider identity exists so GoTrue password login succeeds
+        if (finalEmail) {
+          await dbQuery(
+            `
+            INSERT INTO auth.identities (
+              id,
+              user_id,
+              identity_data,
+              provider,
+              provider_id,
+              last_sign_in_at,
+              created_at,
+              updated_at
+            ) VALUES (
+              gen_random_uuid(),
+              $1::uuid,
+              jsonb_build_object(
+                'sub', $1::uuid::text,
+                'email', $2::text,
+                'phone', $3::text,
+                'full_name', $4::text
+              ),
+              'email',
+              $1::uuid::text,
+              now(),
+              now(),
+              now()
+            )
+            ON CONFLICT (provider, provider_id) DO NOTHING;
+            `,
+            [result.user_id, finalEmail, cleanCustomerPhone, result.customer_name || "Customer"]
+          )
+        }
+      } catch (syncErr: any) {
+        console.warn("[Verify Payment Customer Sync Notice]:", syncErr?.message)
+      }
+    }
+
+    // 7. Frictionless Guest Auto-Login Handoff & Magic Link Provisioning
     const isGuestCheckout = !activeUser && Boolean(result.customer_email)
     const guestEmail = result.customer_email
     let autoLoginToken: string | null = null
@@ -252,8 +315,9 @@ export async function POST(request: NextRequest) {
       needsVerification: false,
       autoLoginToken: autoLoginToken || undefined,
       email: guestEmail || undefined,
-      customerEmail: result.customer_email,
-      customerPhone: result.customer_phone,
+      customerEmail: finalEmail || result.customer_email,
+      customerPhone: cleanCustomerPhone || result.customer_phone,
+      tempPassword: cleanCustomerPhone,
       emailSent,
     })
   } catch (error: any) {

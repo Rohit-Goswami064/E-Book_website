@@ -27,7 +27,19 @@ export function DownloadAction({
 
       if (res.ok && data.downloadUrl) {
         toast.success("Download started securely.")
-        window.open(data.downloadUrl, "_blank")
+
+        // Directly initiate download to user's local device
+        const a = document.createElement("a")
+        a.href = data.downloadUrl
+        a.setAttribute("download", data.filename || "publication.pdf")
+        a.style.display = "none"
+        document.body.appendChild(a)
+        a.click()
+        setTimeout(() => {
+          try {
+            document.body.removeChild(a)
+          } catch {}
+        }, 200)
       } else {
         toast.error(data.error || "Failed to generate download link.")
       }

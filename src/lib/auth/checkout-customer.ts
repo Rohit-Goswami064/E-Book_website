@@ -375,3 +375,8 @@ export async function provisionNewCustomer(data: {
   }
 }
 
+export { getOrCreatePasswordlessCustomer } from "./passwordless-customer"
+export type { PasswordlessCustomerResult, PasswordlessCustomerInput } from "./passwordless-customer"
+
+
+

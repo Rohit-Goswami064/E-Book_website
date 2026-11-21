@@ -19,27 +19,18 @@ import {
   Check,
   Tag,
   X,
-  Sparkles,
   User,
   Phone,
   Mail,
   ShieldCheck,
   CheckCircle2,
   ArrowRight,
-  Eye,
-  EyeOff,
-  AlertCircle,
-  Lock,
-  UserCheck,
   KeyRound,
 } from "lucide-react"
 import { toast } from "sonner"
 import { formatCurrency } from "@/lib/utils"
 import { createClient } from "@/lib/supabase/client"
-import {
-  normalizeIndianMobile,
-  validatePasswordComplexity,
-} from "@/lib/auth/mobile-normalizer"
+import { normalizeIndianMobile } from "@/lib/auth/mobile-normalizer"
 
 declare global {
   interface Window {
@@ -57,6 +48,8 @@ interface CheckoutButtonProps {
   isEntitled: boolean
   userEmail?: string | null
   userName?: string | null
+  userPhone?: string | null
+  coverImageUrl?: string | null
 }
 
 interface AppliedCoupon {
@@ -70,7 +63,8 @@ interface CompletedOrderInfo {
   orderId: string
   isNewAccount: boolean
   userPhone: string
-  userEmail: string
+  userName?: string
+  userEmail?: string
   bookId: string
 }
 
@@ -84,48 +78,31 @@ export function CheckoutButton({
   isEntitled,
   userEmail,
   userName,
+  userPhone,
+  coverImageUrl,
 }: CheckoutButtonProps) {
   const router = useRouter()
   const [loading, setLoading] = React.useState(false)
 
-  // Coupon state
+  // Express Checkout Modal state: Name & Mobile Number only
+  const [isCheckoutDialogOpen, setIsCheckoutDialogOpen] = React.useState(false)
+  const [guestName, setGuestName] = React.useState(userName || "")
+  const [nameError, setNameError] = React.useState<string | null>(null)
+  const [guestMobile, setGuestMobile] = React.useState(userPhone || "")
+  const [mobileError, setMobileError] = React.useState<string | null>(null)
+
+  // Collapsible Coupon state (collapsed by default)
+  const [isCouponExpanded, setIsCouponExpanded] = React.useState(false)
   const [couponInput, setCouponInput] = React.useState("")
   const [appliedCoupon, setAppliedCoupon] = React.useState<AppliedCoupon | null>(null)
   const [validatingCoupon, setValidatingCoupon] = React.useState(false)
   const [couponError, setCouponError] = React.useState<string | null>(null)
-  const [isCouponDialogOpen, setIsCouponDialogOpen] = React.useState(false)
-
-  // Instant Checkout Form state
-  const [isGuestDialogOpen, setIsGuestDialogOpen] = React.useState(false)
-  const [guestFullName, setGuestFullName] = React.useState(userName || "")
-  const [guestMobile, setGuestMobile] = React.useState("")
-  const [guestEmail, setGuestEmail] = React.useState(userEmail || "")
-  const [guestPassword, setGuestPassword] = React.useState("")
-  const [guestConfirmPassword, setGuestConfirmPassword] = React.useState("")
-  const [showPassword, setShowPassword] = React.useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = React.useState(false)
-
-  // Account Detection State
-  const [accountState, setAccountState] = React.useState<
-    "idle" | "checking" | "new" | "existing" | "conflict"
-  >("idle")
-  const [accountConflictError, setAccountConflictError] = React.useState<string | null>(null)
-  const [accountMaskedEmail, setAccountMaskedEmail] = React.useState<string | null>(null)
-  const [accountHasPassword, setAccountHasPassword] = React.useState(true)
-
-  const [guestErrors, setGuestErrors] = React.useState<{
-    fullName?: string
-    mobile?: string
-    email?: string
-    password?: string
-    confirmPassword?: string
-  }>({})
 
   // Success / Account Access Dialog state
   const [isSuccessDialogOpen, setIsSuccessDialogOpen] = React.useState(false)
   const [completedOrder, setCompletedOrder] = React.useState<CompletedOrderInfo | null>(null)
 
-  // Pre-load Razorpay script safely
+  // Pre-load Razorpay checkout script safely
   function loadRazorpayCheckoutScript(): Promise<boolean> {
     return new Promise((resolve) => {
       if (typeof window === "undefined") {
@@ -162,66 +139,11 @@ export function CheckoutButton({
     })
   }
 
-  // Preload Razorpay on mount
   React.useEffect(() => {
     loadRazorpayCheckoutScript().catch(() => {})
   }, [])
 
-  // Debounced check for existing account or conflict when mobile or email changes
-  React.useEffect(() => {
-    const cleanMobile = normalizeIndianMobile(guestMobile)
-    const cleanEmail = guestEmail.trim().toLowerCase()
-    const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)
-
-    if (!cleanMobile && !isValidEmail) {
-      setAccountState("idle")
-      setAccountConflictError(null)
-      return
-    }
-
-    const timer = setTimeout(async () => {
-      setAccountState("checking")
-      try {
-        const res = await fetch("/api/auth/check-account", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mobile: cleanMobile || undefined,
-            email: isValidEmail ? cleanEmail : undefined,
-          }),
-        })
-
-        const data = await res.json()
-        if (res.ok) {
-          if (data.conflict) {
-            setAccountState("conflict")
-            setAccountConflictError(
-              data.conflictError ||
-                "The mobile number and email address belong to two different accounts. Please use matching credentials."
-            )
-          } else if (data.exists && data.accountType === "existing") {
-            setAccountState("existing")
-            setAccountConflictError(null)
-            setAccountMaskedEmail(data.maskedEmail)
-            setAccountHasPassword(data.hasPassword ?? true)
-          } else {
-            setAccountState("new")
-            setAccountConflictError(null)
-            setAccountMaskedEmail(null)
-            setAccountHasPassword(true)
-          }
-        } else {
-          setAccountState("idle")
-        }
-      } catch {
-        setAccountState("idle")
-      }
-    }, 450)
-
-    return () => clearTimeout(timer)
-  }, [guestMobile, guestEmail])
-
-  // If user is already entitled, render "Read Now" CTA
+  // If user is already entitled to the book, render "Read Now" CTA directly
   if (isEntitled) {
     return (
       <div className="flex flex-col sm:flex-row gap-3 w-full">
@@ -292,7 +214,7 @@ export function CheckoutButton({
           savingsFormatted: data.savingsFormatted,
         })
         setCouponInput("")
-        setIsCouponDialogOpen(false)
+        setIsCouponExpanded(false)
         toast.success(data.message || `Coupon "${data.code}" applied!`)
       } else {
         setCouponError(data.error || "Invalid coupon code.")
@@ -313,112 +235,93 @@ export function CheckoutButton({
     toast.info("Coupon removed.")
   }
 
-  // Effective price considering active coupon
+  // Authoritative price on client view
   const effectivePriceCents = appliedCoupon ? appliedCoupon.finalPriceCents : priceCents
 
-  // Real-time password complexity state
-  const passwordComplexity = validatePasswordComplexity(guestPassword)
-  const isExistingAccount = accountState === "existing" && accountHasPassword
+  // Validate Name & 10-digit Indian Mobile Number
+  const validateInputs = (): boolean => {
+    let isValid = true
 
-  // Validate instant checkout input fields
-  const validateGuestDetails = () => {
-    const errors: {
-      fullName?: string
-      mobile?: string
-      email?: string
-      password?: string
-      confirmPassword?: string
-    } = {}
-
-    if (!guestFullName.trim() || guestFullName.trim().length < 2) {
-      errors.fullName = "Please enter your full name (at least 2 characters)."
-    }
-
-    const cleanMobile = normalizeIndianMobile(guestMobile)
-    if (!cleanMobile) {
-      errors.mobile = "Please enter a valid 10-digit Indian mobile number."
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!guestEmail.trim() || !emailRegex.test(guestEmail.trim())) {
-      errors.email = "Please enter a valid email address for ebook access."
-    }
-
-    if (accountState === "conflict") {
-      toast.error(
-        accountConflictError ||
-          "Account Conflict: Mobile number and email address belong to two different accounts."
-      )
-      return false
-    }
-
-    if (isExistingAccount) {
-      // Existing account requires password to authenticate ownership
-      if (!guestPassword) {
-        errors.password = "Please enter your account password to verify ownership."
-      }
+    const cleanName = guestName.trim()
+    if (!cleanName || cleanName.length < 2) {
+      setNameError("Please enter your full name (at least 2 characters).")
+      isValid = false
     } else {
-      // New account or account setting password requires strict complexity & confirm match
-      if (!passwordComplexity.valid) {
-        errors.password =
-          passwordComplexity.errors[0] ||
-          "Password must be at least 8 characters with uppercase, lowercase, number, and special character."
-      }
-      if (guestPassword !== guestConfirmPassword) {
-        errors.confirmPassword = "Passwords do not match. Please re-enter confirm password."
-      }
+      setNameError(null)
     }
 
-    setGuestErrors(errors)
-    return Object.keys(errors).length === 0
+    const clean = guestMobile.replace(/\D/g, "")
+    if (!clean) {
+      setMobileError("Please enter your 10-digit mobile number.")
+      isValid = false
+    } else if (clean.length !== 10) {
+      setMobileError("Please enter a valid 10-digit Indian mobile number.")
+      isValid = false
+    } else if (!/^[5-9]\d{9}$/.test(clean)) {
+      setMobileError("Please enter a valid mobile number starting with 6, 7, 8, or 9.")
+      isValid = false
+    } else {
+      setMobileError(null)
+    }
+
+    return isValid
   }
 
-  // Primary action click: If user is logged in, proceed directly; if not, open guest checkout modal
-  const handlePrimaryClick = async () => {
-    // Check if user is already logged in
-    let activeEmail = userEmail
-    if (!activeEmail) {
-      try {
-        const supabase = createClient()
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
-        if (user) {
-          activeEmail = user.email
-        }
-      } catch {}
-    }
-
-    if (!activeEmail) {
-      // Unauthenticated: Open instant checkout modal
-      setGuestErrors({})
-      setIsGuestDialogOpen(true)
-    } else {
-      // Authenticated: Proceed with existing checkout flow
-      handleExecuteOrder(null)
-    }
+  // Primary action click on page
+  const handlePrimaryClick = () => {
+    setNameError(null)
+    setMobileError(null)
+    setIsCheckoutDialogOpen(true)
   }
 
-  // Execute Order creation & payment (For both Authenticated & Guest checkouts)
-  const handleExecuteOrder = async (
-    guestPayload: {
-      fullName: string
-      mobile: string
-      email: string
-      password?: string
-      confirmPassword?: string
-    } | null
-  ) => {
+  // Handle redirect from "Read Now in Library" button with guaranteed auto-sign-in
+  const handleReadNowClick = async () => {
     setLoading(true)
+    const phone = completedOrder?.userPhone || guestMobile || userPhone
+    const cleanPhone = phone ? phone.replace(/\D/g, "") : ""
+    const email = completedOrder?.userEmail || (cleanPhone ? `${cleanPhone}@hiddenbooks.in` : userEmail)
+
     try {
-      // 1. Create order on server (authoritatively validates account & calculates verified price)
+      const supabase = createClient()
+      const { data: { session } } = await supabase.auth.getSession()
+
+      // If session not ready yet, perform auto-sign-in with temporary password (mobile number)
+      if (!session && email && cleanPhone) {
+        await supabase.auth.signInWithPassword({
+          email,
+          password: cleanPhone,
+        })
+      }
+    } catch (e) {
+      console.warn("[Read Now Redirect Auto-sign-in Error]:", e)
+    }
+
+    // Redirect to user dashboard with auto-signed-in session
+    window.location.href = "/account?setup_password=1"
+  }
+
+  // Execute Order creation & payment
+  const handleExecuteCheckout = async () => {
+    const cleanMobile = (userPhone || guestMobile).replace(/\D/g, "")
+    const cleanName = (userName || guestName).trim()
+
+    if (!userPhone && !userEmail) {
+      if (!validateInputs()) return
+    }
+
+    setLoading(true)
+
+    try {
+      // 1. Create order on server (authoritatively resolves user & calculates price)
       const res = await fetch("/api/checkout/create-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           bookId,
           couponCode: appliedCoupon?.code || null,
-          guestDetails: guestPayload,
+          customerName: cleanName || undefined,
+          customerMobile: cleanMobile || undefined,
+          customerEmail: userEmail || undefined,
         }),
       })
 
@@ -429,58 +332,41 @@ export function CheckoutButton({
         return
       }
 
-      // Close guest modal if open
-      setIsGuestDialogOpen(false)
+      setIsCheckoutDialogOpen(false)
 
-      // 2. If book is Free or 100% discounted via coupon
+      // 2. If book is Free or 100% discounted
       if (data.isFree) {
         toast.success(data.message || "Book successfully added to your library!")
-        if (guestPayload) {
-          // Attempt immediate client session sign-in if password was entered
-          if (guestPayload.password) {
-            try {
-              const supabase = createClient()
-              await supabase.auth.signInWithPassword({
-                email: data.userEmail || guestPayload.email,
-                password: guestPayload.password,
-              })
-            } catch {}
-          }
-
-          setCompletedOrder({
-            orderId: data.orderId,
-            isNewAccount: !!data.isNewAccount,
-            userPhone: data.userPhone || guestPayload.mobile,
-            userEmail: data.userEmail || guestPayload.email,
-            bookId: data.bookId || bookId,
-          })
-          setIsSuccessDialogOpen(true)
-        } else {
-          window.location.href = `/read/${bookId}`
-        }
+        setCompletedOrder({
+          orderId: data.orderId,
+          isNewAccount: !!data.isNewAccount,
+          userPhone: data.userPhone || cleanMobile,
+          userName: cleanName || userName || "",
+          userEmail: data.userEmail,
+          bookId: data.bookId || bookId,
+        })
+        setIsSuccessDialogOpen(true)
         setLoading(false)
         return
       }
 
-      // 3. Ensure Razorpay Checkout Modal is loaded
+      // 3. Ensure Razorpay SDK is ready
       let isSdkReady = !!window.Razorpay
       if (!isSdkReady) {
         isSdkReady = await loadRazorpayCheckoutScript()
       }
 
       if (!isSdkReady || !window.Razorpay) {
-        toast.error("Payment SDK could not be loaded. Please check your internet connection and retry.")
+        toast.error("Payment gateway could not be loaded. Please check your connection and retry.")
         setLoading(false)
         return
       }
 
       if (!data.keyId) {
-        toast.error("Payment gateway configuration error: missing public Key ID.")
+        toast.error("Payment configuration missing: public Key ID.")
         setLoading(false)
         return
       }
-
-      const currentPassword = guestPayload?.password
 
       const options = {
         key: data.keyId,
@@ -490,15 +376,15 @@ export function CheckoutButton({
         description: `Purchase of ${data.bookTitle}`,
         order_id: data.razorpayOrderId,
         prefill: {
-          name: data.userName || guestPayload?.fullName || userName || "",
-          email: data.userEmail || guestPayload?.email || userEmail || "",
-          contact: data.userPhone || guestPayload?.mobile || "",
+          name: data.userName || cleanName || userName || "",
+          contact: data.userPhone || cleanMobile || "",
+          email: data.userEmail || (cleanMobile ? `${cleanMobile}@hiddenbooks.in` : userEmail || ""),
         },
         theme: {
           color: "#111111",
         },
         handler: async function (response: any) {
-          // 4. Send signatures to server for cryptographic HMAC-SHA256 verification
+          // 4. Verify HMAC-SHA256 signature on server
           try {
             const verifyRes = await fetch("/api/checkout/verify-payment", {
               method: "POST",
@@ -512,34 +398,50 @@ export function CheckoutButton({
 
             const verifyData = await verifyRes.json()
             if (verifyRes.ok && verifyData.success) {
-              toast.success("Payment verified! Your eBook has been added to your library.")
+              toast.success("Payment verified! Your eBook has been unlocked.")
 
-              // Immediately establish client authentication session so reader opens without redirect to login
-              if (currentPassword && (verifyData.customerEmail || guestPayload?.email)) {
+              // Establish active customer session using temporary password (mobile number)
+              const phonePassword = cleanMobile || verifyData.customerPhone
+              const targetEmail = verifyData.customerEmail || (phonePassword ? `${phonePassword}@hiddenbooks.in` : null)
+              let sessionReady = false
+
+              if (targetEmail && phonePassword) {
                 try {
                   const supabase = createClient()
-                  await supabase.auth.signInWithPassword({
-                    email: verifyData.customerEmail || guestPayload?.email,
-                    password: currentPassword,
+                  const { error: signInErr } = await supabase.auth.signInWithPassword({
+                    email: targetEmail,
+                    password: phonePassword,
+                  })
+                  if (!signInErr) {
+                    sessionReady = true
+                  }
+                } catch (authErr) {
+                  console.warn("[Password Sign-In Notice]:", authErr)
+                }
+              }
+
+              // Fallback to magic link token if needed
+              if (!sessionReady && verifyData.autoLoginToken) {
+                try {
+                  const supabase = createClient()
+                  await supabase.auth.verifyOtp({
+                    token_hash: verifyData.autoLoginToken,
+                    type: "magiclink",
                   })
                 } catch (authErr) {
                   console.warn("[Auto-Session Notice]:", authErr)
                 }
               }
 
-              if (guestPayload || verifyData.isNewAccount) {
-                // Show Guest Account Access & Success Modal
-                setCompletedOrder({
-                  orderId: verifyData.orderId,
-                  isNewAccount: !!verifyData.isNewAccount,
-                  userPhone: verifyData.customerPhone || guestPayload?.mobile || "",
-                  userEmail: verifyData.customerEmail || guestPayload?.email || "",
-                  bookId: verifyData.bookId || bookId,
-                })
-                setIsSuccessDialogOpen(true)
-              } else {
-                window.location.href = `/read/${bookId}`
-              }
+              setCompletedOrder({
+                orderId: verifyData.orderId,
+                isNewAccount: !!verifyData.isNewAccount,
+                userPhone: verifyData.customerPhone || cleanMobile,
+                userName: cleanName || userName || "",
+                userEmail: verifyData.customerEmail,
+                bookId: verifyData.bookId || bookId,
+              })
+              setIsSuccessDialogOpen(true)
             } else {
               toast.error(verifyData.error || "Payment verification failed.")
             }
@@ -552,14 +454,14 @@ export function CheckoutButton({
         modal: {
           ondismiss: function () {
             setLoading(false)
-            toast.info("Payment was cancelled.")
+            toast.info("Payment cancelled.")
           },
         },
       }
 
       const rzp = new window.Razorpay(options)
       rzp.on("payment.failed", function (resp: any) {
-        toast.error(`Payment failed: ${resp.error?.description || "Declined"}`)
+        toast.error(`Payment failed: ${resp.error?.description || "Transaction declined"}`)
         setLoading(false)
       })
       rzp.open()
@@ -569,23 +471,9 @@ export function CheckoutButton({
     }
   }
 
-  // Handle Instant Checkout Form submission
-  const handleGuestSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!validateGuestDetails()) return
-
-    handleExecuteOrder({
-      fullName: guestFullName.trim(),
-      mobile: guestMobile.trim(),
-      email: guestEmail.trim(),
-      password: guestPassword,
-      confirmPassword: guestConfirmPassword,
-    })
-  }
-
   return (
     <div className="space-y-3 w-full">
-      {/* Primary Action Buttons Container - Mobile & Desktop Optimized */}
+      {/* Primary Action Button on Page */}
       <div className="flex flex-col sm:flex-row gap-3 w-full items-stretch">
         <Button
           onClick={handlePrimaryClick}
@@ -618,25 +506,9 @@ export function CheckoutButton({
             </>
           )}
         </Button>
-
-        {!isFree && priceCents > 0 && (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              setCouponError(null)
-              setIsCouponDialogOpen(true)
-            }}
-            size="lg"
-            className="w-full sm:w-auto rounded-full h-12 sm:h-13 text-xs sm:text-sm font-semibold px-5 gap-2 border-black/15 hover:bg-neutral-100 bg-white shadow-sm"
-          >
-            <Tag className="w-3.5 h-3.5 text-neutral-600" />
-            <span>{appliedCoupon ? "Change Coupon" : "Apply Coupon"}</span>
-          </Button>
-        )}
       </div>
 
-      {/* Applied Coupon Banner */}
+      {/* Applied Coupon Banner on Page */}
       {appliedCoupon && (
         <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200/80 rounded-[16px] px-3.5 py-2.5 text-xs text-emerald-800">
           <div className="flex items-center gap-2">
@@ -661,439 +533,307 @@ export function CheckoutButton({
         </div>
       )}
 
-      {/* 1. Instant Checkout Modal Dialog */}
-      <Dialog open={isGuestDialogOpen} onOpenChange={setIsGuestDialogOpen}>
-        <DialogContent className="w-[92vw] max-w-md max-h-[92vh] overflow-y-auto rounded-[24px] p-5 sm:p-7 bg-[#FBFBFA] border border-black/10 shadow-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-xl sm:text-2xl font-bold font-serif text-neutral-900 flex items-center gap-2">
-              <ShoppingBag className="w-5 h-5 text-neutral-800" />
-              <span>Instant Checkout</span>
+      {/* Express Checkout Modal Dialog */}
+      <Dialog open={isCheckoutDialogOpen} onOpenChange={setIsCheckoutDialogOpen}>
+        <DialogContent className="w-[95vw] sm:max-w-lg md:max-w-[560px] max-h-[92vh] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-[24px] sm:rounded-[30px] p-5 sm:p-7 bg-[#FBFBFA] border border-black/10 shadow-2xl space-y-4 sm:space-y-5">
+          <DialogHeader className="text-left space-y-1.5 pb-1 border-b border-black/[0.06]">
+            <DialogTitle className="text-xl sm:text-2xl font-bold font-serif text-neutral-900 flex items-center gap-2.5">
+              <span className="w-8 h-8 rounded-xl bg-neutral-900 text-white flex items-center justify-center shadow-xs shrink-0">
+                <ShoppingBag className="w-4 h-4 stroke-[2.2]" />
+              </span>
+              <span>Express Checkout</span>
             </DialogTitle>
-            <DialogDescription className="text-xs text-neutral-500 pt-1">
-              Complete your contact and security details to place your order. Your ebook will be ready in your private library immediately.
+            <DialogDescription className="text-xs sm:text-[13px] text-neutral-500 font-normal leading-relaxed">
+              Instant digital delivery • Read on any smartphone, tablet, or browser
             </DialogDescription>
           </DialogHeader>
 
-          {/* Account Status Indicator Banner */}
-          {accountState === "conflict" && (
-            <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-900 flex items-start gap-2.5">
-              <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold text-[12px]">Account Conflict Detected</p>
-                <p className="text-[11px] text-red-700 mt-0.5 leading-relaxed">
-                  {accountConflictError ||
-                    "The provided mobile number and email address belong to two different accounts. Please use the matching credentials."}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {accountState === "existing" && accountHasPassword && (
-            <div className="p-3 rounded-xl bg-blue-50/80 border border-blue-200/80 text-xs text-blue-900 flex items-start gap-2.5">
-              <UserCheck className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold text-[12px]">Existing Account Found</p>
-                <p className="text-[11px] text-blue-700 mt-0.5 leading-relaxed">
-                  Welcome back! Please enter your existing password to authenticate and link this purchase to your account.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {accountState === "new" && (
-            <div className="p-3 rounded-xl bg-emerald-50/80 border border-emerald-200/80 text-xs text-emerald-900 flex items-start gap-2.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold text-[12px]">New Customer Account</p>
-                <p className="text-[11px] text-emerald-700 mt-0.5 leading-relaxed">
-                  Set a secure password. You will use your mobile number and this password to sign in to your library from any device.
-                </p>
-              </div>
-            </div>
-          )}
-
-          <form onSubmit={handleGuestSubmit} className="space-y-4 pt-1">
-            {/* Full Name Field */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-neutral-800 uppercase tracking-wider flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-neutral-500" />
-                <span>Full Name</span>
-              </label>
-              <Input
-                type="text"
-                value={guestFullName}
-                onChange={(e) => {
-                  setGuestFullName(e.target.value)
-                  if (guestErrors.fullName) setGuestErrors({ ...guestErrors, fullName: undefined })
-                }}
-                placeholder="e.g. Rahul Sharma"
-                className="h-11 rounded-xl bg-white border-black/15 text-sm"
-                required
-              />
-              {guestErrors.fullName && (
-                <p className="text-[11px] text-red-600 font-medium pl-1">{guestErrors.fullName}</p>
-              )}
-            </div>
-
-            {/* Mobile Number Field (Login ID) */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-neutral-800 uppercase tracking-wider flex items-center gap-1.5">
-                <Phone className="w-3.5 h-3.5 text-neutral-500" />
-                <span>Mobile Number (Login ID)</span>
-              </label>
-              <div className="relative flex items-center">
-                <span className="absolute left-3.5 text-xs font-semibold text-neutral-500 select-none">
-                  +91
-                </span>
-                <Input
-                  type="tel"
-                  maxLength={10}
-                  value={guestMobile}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/[^0-9]/g, "")
-                    setGuestMobile(val)
-                    if (guestErrors.mobile) setGuestErrors({ ...guestErrors, mobile: undefined })
-                  }}
-                  placeholder="9876543210"
-                  className="pl-12 h-11 rounded-xl bg-white border-black/15 text-sm font-mono tracking-wider"
-                  required
+          {/* Book Summary Card */}
+          <div className="flex items-center gap-4 p-3.5 sm:p-4 rounded-2xl bg-white border border-black/[0.08] shadow-2xs">
+            <div className="w-16 h-22 sm:w-18 sm:h-26 rounded-xl overflow-hidden bg-neutral-100 flex-shrink-0 shadow-xs border border-black/5 relative flex items-center justify-center">
+              {coverImageUrl ? (
+                <img
+                  src={coverImageUrl}
+                  alt={title}
+                  className="w-full h-full object-cover"
                 />
-              </div>
-              {guestErrors.mobile ? (
-                <p className="text-[11px] text-red-600 font-medium pl-1">{guestErrors.mobile}</p>
               ) : (
-                <p className="text-[10px] text-neutral-400 pl-1">
-                  Used as your secure login ID to access this ebook on any device.
-                </p>
-              )}
-            </div>
-
-            {/* Email Address Field */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-neutral-800 uppercase tracking-wider flex items-center gap-1.5">
-                <Mail className="w-3.5 h-3.5 text-neutral-500" />
-                <span>Email Address</span>
-              </label>
-              <Input
-                type="email"
-                value={guestEmail}
-                onChange={(e) => {
-                  setGuestEmail(e.target.value)
-                  if (guestErrors.email) setGuestErrors({ ...guestErrors, email: undefined })
-                }}
-                placeholder="you@example.com"
-                className="h-11 rounded-xl bg-white border-black/15 text-sm"
-                required
-              />
-              {guestErrors.email ? (
-                <p className="text-[11px] text-red-600 font-medium pl-1">{guestErrors.email}</p>
-              ) : (
-                <p className="text-[10px] text-neutral-400 pl-1">
-                  Payment receipt & order invoice will be delivered here.
-                </p>
-              )}
-            </div>
-
-            {/* Password Field (Required for both New and Existing) */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-neutral-800 uppercase tracking-wider flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-neutral-500" />
-                  <span>
-                    {isExistingAccount ? "Account Password" : "Password (Required)"}
+                <div className="w-full h-full bg-[#E8E0D6] flex flex-col items-center justify-center p-1 text-center">
+                  <span className="font-serif font-bold text-xs text-neutral-800">HB</span>
+                  <span className="text-[8px] uppercase tracking-wider text-neutral-600 font-semibold mt-0.5">
+                    eBook
                   </span>
-                </label>
-                {isExistingAccount && (
-                  <a
-                    href="/forgot-password"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[11px] text-neutral-500 hover:text-neutral-900 underline underline-offset-2"
-                  >
-                    Forgot password?
-                  </a>
-                )}
-              </div>
-              <div className="relative flex items-center">
-                <Input
-                  type={showPassword ? "text" : "password"}
-                  value={guestPassword}
-                  onChange={(e) => {
-                    setGuestPassword(e.target.value)
-                    if (guestErrors.password)
-                      setGuestErrors({ ...guestErrors, password: undefined })
-                  }}
-                  placeholder={
-                    isExistingAccount
-                      ? "Enter your account password"
-                      : "Create secure password (min 8 chars)"
-                  }
-                  className="pr-10 h-11 rounded-xl bg-white border-black/15 text-sm"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 text-neutral-400 hover:text-neutral-700 transition-colors"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                >
-                  {showPassword ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
-              {guestErrors.password && (
-                <p className="text-[11px] text-red-600 font-medium pl-1">
-                  {guestErrors.password}
-                </p>
-              )}
-
-              {/* Password Requirements Checklist (for New Accounts) */}
-              {!isExistingAccount && guestPassword.length > 0 && (
-                <div className="p-2.5 rounded-xl bg-neutral-100/70 border border-black/5 text-[11px] space-y-1 mt-1">
-                  <div className="font-semibold text-neutral-600 text-[10px] uppercase tracking-wide">
-                    Password Security Requirements:
-                  </div>
-                  <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
-                    <div
-                      className={`flex items-center gap-1.5 ${
-                        passwordComplexity.hasMinLength
-                          ? "text-emerald-700 font-medium"
-                          : "text-neutral-500"
-                      }`}
-                    >
-                      <Check
-                        className={`w-3 h-3 ${
-                          passwordComplexity.hasMinLength
-                            ? "text-emerald-600 stroke-[3]"
-                            : "opacity-30"
-                        }`}
-                      />
-                      <span>8+ characters</span>
-                    </div>
-                    <div
-                      className={`flex items-center gap-1.5 ${
-                        passwordComplexity.hasUppercase && passwordComplexity.hasLowercase
-                          ? "text-emerald-700 font-medium"
-                          : "text-neutral-500"
-                      }`}
-                    >
-                      <Check
-                        className={`w-3 h-3 ${
-                          passwordComplexity.hasUppercase && passwordComplexity.hasLowercase
-                            ? "text-emerald-600 stroke-[3]"
-                            : "opacity-30"
-                        }`}
-                      />
-                      <span>Uppercase & lowercase</span>
-                    </div>
-                    <div
-                      className={`flex items-center gap-1.5 ${
-                        passwordComplexity.hasNumber
-                          ? "text-emerald-700 font-medium"
-                          : "text-neutral-500"
-                      }`}
-                    >
-                      <Check
-                        className={`w-3 h-3 ${
-                          passwordComplexity.hasNumber
-                            ? "text-emerald-600 stroke-[3]"
-                            : "opacity-30"
-                        }`}
-                      />
-                      <span>At least 1 number</span>
-                    </div>
-                    <div
-                      className={`flex items-center gap-1.5 ${
-                        passwordComplexity.hasSpecialChar
-                          ? "text-emerald-700 font-medium"
-                          : "text-neutral-500"
-                      }`}
-                    >
-                      <Check
-                        className={`w-3 h-3 ${
-                          passwordComplexity.hasSpecialChar
-                            ? "text-emerald-600 stroke-[3]"
-                            : "opacity-30"
-                        }`}
-                      />
-                      <span>Special character (!@#)</span>
-                    </div>
-                  </div>
                 </div>
               )}
             </div>
+            <div className="flex-1 min-w-0 py-0.5">
+              <h4 className="font-serif font-bold text-sm sm:text-base text-neutral-900 leading-snug line-clamp-2">
+                {title}
+              </h4>
+              <div className="inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200/70 text-[10px] sm:text-[11px] font-semibold text-emerald-800">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span>Lifetime Access • PDF eBook</span>
+              </div>
+              <div className="mt-2 flex items-baseline gap-2.5">
+                {appliedCoupon ? (
+                  <>
+                    <span className="text-lg sm:text-xl font-bold text-neutral-900 font-mono">
+                      {formatCurrency(effectivePriceCents, currency)}
+                    </span>
+                    <span className="text-xs line-through text-neutral-400 font-medium">
+                      {formatCurrency(priceCents, currency)}
+                    </span>
+                    <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
+                      Saved {appliedCoupon.savingsFormatted}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-lg sm:text-xl font-bold text-neutral-900 font-mono">
+                    {formatCurrency(priceCents, currency)}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
 
-            {/* Confirm Password Field (Required for New Customer) */}
-            {!isExistingAccount && (
+          {/* Delivery & Account Section: Full Name & Mobile Number */}
+          {userPhone || userEmail ? (
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-black/[0.08] flex items-center justify-between text-xs shadow-2xs">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-full bg-neutral-100 flex items-center justify-center flex-shrink-0 text-neutral-700">
+                  <User className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase font-bold tracking-wider text-neutral-400">
+                    Delivering to
+                  </p>
+                  <p className="font-medium text-neutral-900 truncate text-sm">
+                    {userName ? `${userName} (+91 ${userPhone || ""})` : userPhone ? `+91 ${userPhone}` : userEmail}
+                  </p>
+                </div>
+              </div>
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold text-[10px] border border-emerald-200/80 flex-shrink-0">
+                Account Active
+              </span>
+            </div>
+          ) : (
+            <div className="space-y-3.5">
+              {/* Full Name Field */}
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-neutral-800 uppercase tracking-wider flex items-center gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5 text-neutral-500" />
-                  <span>Confirm Password (Required)</span>
+                <label className="text-xs font-bold text-neutral-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-neutral-400" />
+                  <span>Full Name</span>
                 </label>
                 <div className="relative flex items-center">
+                  <User className="absolute left-3.5 w-4 h-4 text-neutral-400 pointer-events-none" />
                   <Input
-                    type={showConfirmPassword ? "text" : "password"}
-                    value={guestConfirmPassword}
+                    type="text"
+                    value={guestName}
                     onChange={(e) => {
-                      setGuestConfirmPassword(e.target.value)
-                      if (guestErrors.confirmPassword)
-                        setGuestErrors({ ...guestErrors, confirmPassword: undefined })
+                      setGuestName(e.target.value)
+                      if (nameError) setNameError(null)
                     }}
-                    placeholder="Re-enter your password"
-                    className="pr-10 h-11 rounded-xl bg-white border-black/15 text-sm"
+                    placeholder="e.g. Rahul Sharma"
+                    autoFocus
+                    autoComplete="name"
+                    className="pl-11 h-12 rounded-xl bg-white border border-neutral-200 text-sm font-medium text-neutral-900 placeholder:text-neutral-400 shadow-2xs transition-all hover:border-neutral-300 focus-visible:border-neutral-900 focus-visible:ring-1 focus-visible:ring-neutral-900/30"
                     required
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3 text-neutral-400 hover:text-neutral-700 transition-colors"
-                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
-                  >
-                    {showConfirmPassword ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
-                  </button>
                 </div>
-                {guestErrors.confirmPassword ? (
-                  <p className="text-[11px] text-red-600 font-medium pl-1">
-                    {guestErrors.confirmPassword}
-                  </p>
-                ) : guestConfirmPassword.length > 0 && (
-                  <p
-                    className={`text-[11px] font-medium pl-1 ${
-                      guestPassword === guestConfirmPassword
-                        ? "text-emerald-600"
-                        : "text-amber-600"
-                    }`}
-                  >
-                    {guestPassword === guestConfirmPassword
-                      ? "✓ Passwords match"
-                      : "✕ Passwords do not match"}
+                {nameError && (
+                  <p className="text-[11px] text-red-600 font-medium pl-1">{nameError}</p>
+                )}
+              </div>
+
+              {/* Mobile Number Field */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-neutral-700 uppercase tracking-wider flex items-center gap-1.5">
+                    <Phone className="w-3.5 h-3.5 text-neutral-400" />
+                    <span>Mobile Number</span>
+                  </label>
+                  <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/60">
+                    No password required
+                  </span>
+                </div>
+                <div className="relative flex items-center">
+                  <span className="absolute left-3.5 text-xs sm:text-sm font-semibold text-neutral-700 select-none flex items-center gap-2 pointer-events-none">
+                    <Phone className="w-3.5 h-3.5 text-neutral-400" />
+                    <span>+91</span>
+                    <span className="text-neutral-300">|</span>
+                  </span>
+                  <Input
+                    type="tel"
+                    maxLength={10}
+                    value={guestMobile}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, "")
+                      setGuestMobile(val)
+                      if (mobileError) setMobileError(null)
+                    }}
+                    placeholder="9876543210"
+                    autoComplete="tel"
+                    className="pl-20 h-12 rounded-xl bg-white border border-neutral-200 text-sm font-mono tracking-wider text-neutral-900 placeholder:text-neutral-400 shadow-2xs transition-all hover:border-neutral-300 focus-visible:border-neutral-900 focus-visible:ring-1 focus-visible:ring-neutral-900/30"
+                    required
+                  />
+                </div>
+                {mobileError ? (
+                  <p className="text-[11px] text-red-600 font-medium pl-1">{mobileError}</p>
+                ) : (
+                  <p className="text-[11px] sm:text-xs text-neutral-500 pl-1 leading-relaxed">
+                    Your purchase receipt & personal library access will be linked to this number.
                   </p>
                 )}
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Coupon Code Section inside Modal */}
-            {!isFree && priceCents > 0 && (
-              <div className="space-y-1.5 pt-1">
-                {appliedCoupon ? (
-                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
-                    <div className="flex items-center gap-2">
-                      <Tag className="w-3.5 h-3.5 text-emerald-600" />
-                      <span className="font-bold font-mono uppercase">{appliedCoupon.code}</span>
-                      <span className="text-[11px] text-emerald-700">
+          {/* Collapsible Coupon Section */}
+          {!isFree && priceCents > 0 && (
+            <div className="pt-0.5">
+              {appliedCoupon ? (
+                <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 border border-emerald-200/80 text-xs text-emerald-900 shadow-2xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center flex-shrink-0">
+                      <Check className="w-3 h-3 stroke-[3]" />
+                    </div>
+                    <div className="truncate">
+                      <span className="font-bold font-mono tracking-wider">{appliedCoupon.code}</span>
+                      <span className="text-emerald-700 ml-1.5 font-medium">
                         applied (-{appliedCoupon.savingsFormatted})
                       </span>
                     </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRemoveCoupon}
+                    className="text-xs font-semibold text-rose-600 hover:text-rose-800 ml-2 px-2 py-0.5 rounded transition hover:bg-rose-50"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : !isCouponExpanded ? (
+                <button
+                  type="button"
+                  onClick={() => setIsCouponExpanded(true)}
+                  className="text-xs font-semibold text-neutral-600 hover:text-neutral-900 flex items-center gap-1.5 transition-colors group py-1"
+                >
+                  <Tag className="w-3.5 h-3.5 text-neutral-400 group-hover:text-neutral-700 transition" />
+                  <span className="underline-offset-2 hover:underline">+ Have a coupon code?</span>
+                </button>
+              ) : (
+                <div className="p-3.5 rounded-2xl bg-white border border-black/[0.08] space-y-2.5 shadow-2xs">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-neutral-700 flex items-center gap-1.5">
+                      <Tag className="w-3.5 h-3.5 text-neutral-500" />
+                      <span>Apply Coupon</span>
+                    </span>
                     <button
                       type="button"
-                      onClick={handleRemoveCoupon}
-                      className="text-xs font-semibold text-rose-600 hover:text-rose-800 transition"
+                      onClick={() => {
+                        setIsCouponExpanded(false)
+                        setCouponError(null)
+                      }}
+                      className="text-neutral-400 hover:text-neutral-700 p-0.5 rounded"
                     >
-                      Remove
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                ) : (
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <div className="relative flex-1">
-                        <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
-                        <Input
-                          type="text"
-                          value={couponInput}
-                          onChange={(e) => {
-                            setCouponInput(e.target.value.toUpperCase())
-                            if (couponError) setCouponError(null)
-                          }}
-                          placeholder="Coupon Code (e.g. WELCOME10)"
-                          className="pl-9 h-10 rounded-xl bg-white border-black/15 text-xs uppercase font-mono"
-                        />
-                      </div>
-                      <Button
-                        type="button"
-                        onClick={() => handleApplyCoupon()}
-                        disabled={validatingCoupon || !couponInput.trim()}
-                        size="sm"
-                        className="h-10 px-3.5 rounded-xl text-xs font-bold bg-neutral-900 text-white hover:bg-neutral-800"
-                      >
-                        {validatingCoupon ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          "Apply"
-                        )}
-                      </Button>
-                    </div>
-                    {couponError && (
-                      <p className="text-[11px] text-rose-600 font-medium pl-1 mt-1">
-                        {couponError}
-                      </p>
-                    )}
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      value={couponInput}
+                      onChange={(e) => {
+                        setCouponInput(e.target.value.toUpperCase())
+                        if (couponError) setCouponError(null)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault()
+                          handleApplyCoupon()
+                        }
+                      }}
+                      placeholder="PROMO CODE"
+                      className="uppercase font-mono text-xs tracking-wider h-11 rounded-xl bg-[#FBFBFA]"
+                    />
+                    <Button
+                      type="button"
+                      onClick={() => handleApplyCoupon()}
+                      disabled={validatingCoupon || !couponInput.trim()}
+                      size="sm"
+                      className="h-11 px-5 rounded-xl text-xs font-bold bg-[#111111] hover:bg-neutral-800 text-white shrink-0"
+                    >
+                      {validatingCoupon ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        "Apply"
+                      )}
+                    </Button>
                   </div>
-                )}
-              </div>
-            )}
-
-            {/* Order Price Summary Box */}
-            <div className="p-3.5 rounded-xl bg-neutral-100/80 border border-black/5 flex items-center justify-between text-xs">
-              <div>
-                <div className="font-bold text-neutral-900 truncate max-w-[200px] sm:max-w-xs">
-                  {title}
-                </div>
-                <div className="text-[11px] text-neutral-500">
-                  Digital eBook Edition • Lifetime Access
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="font-bold text-sm text-neutral-900">
-                  {formatCurrency(effectivePriceCents, currency)}
-                </div>
-                {appliedCoupon && (
-                  <div className="text-[10px] text-emerald-700 font-semibold font-mono">
-                    {appliedCoupon.code} applied
+                  {couponError && (
+                    <p className="text-[11px] text-red-600 font-medium pl-1">{couponError}</p>
+                  )}
+                  <div className="flex flex-wrap gap-1.5 pt-1 border-t border-black/5">
+                    <span className="text-[10px] text-neutral-400 self-center">Try:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCouponInput("WELCOME10")
+                        handleApplyCoupon("WELCOME10")
+                      }}
+                      className="px-2 py-0.5 rounded-lg border border-black/10 text-[10px] font-mono font-bold bg-neutral-50 hover:bg-neutral-100 text-neutral-800"
+                    >
+                      WELCOME10
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCouponInput("FLAT50")
+                        handleApplyCoupon("FLAT50")
+                      }}
+                      className="px-2 py-0.5 rounded-lg border border-black/10 text-[10px] font-mono font-bold bg-neutral-50 hover:bg-neutral-100 text-neutral-800"
+                    >
+                      FLAT50
+                    </button>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
+          )}
 
-            {/* Action Buttons */}
-            <div className="pt-2 space-y-2">
-              <Button
-                type="submit"
-                disabled={loading || accountState === "conflict"}
-                className="w-full h-12 rounded-full bg-[#111111] hover:bg-neutral-800 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Initiating Checkout...</span>
-                  </>
-                ) : accountState === "conflict" ? (
-                  <span>Resolve Account Conflict</span>
-                ) : isFree || effectivePriceCents === 0 ? (
+          {/* Action CTA */}
+          <div className="pt-2">
+            <Button
+              type="button"
+              onClick={handleExecuteCheckout}
+              disabled={loading}
+              size="lg"
+              className="w-full h-12 sm:h-13.5 rounded-full bg-[#111111] hover:bg-neutral-800 text-white font-bold text-sm sm:text-base shadow-lg transition-all active:scale-[0.99] gap-2.5 cursor-pointer"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Connecting to Payment...</span>
+                </>
+              ) : isFree || effectivePriceCents === 0 ? (
+                <>
+                  <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" />
                   <span>Claim & Read for Free</span>
-                ) : (
+                </>
+              ) : (
+                <>
+                  <ShoppingBag className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.2]" />
                   <span>Proceed to Payment • {formatCurrency(effectivePriceCents, currency)}</span>
-                )}
-              </Button>
-
-              <div className="flex items-center justify-center gap-1.5 text-[11px] text-neutral-500 pt-1">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                <span>100% Secure Razorpay Checkout • SSL Encrypted</span>
-              </div>
-            </div>
-          </form>
+                </>
+              )}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
-      {/* 2. Success & Account Access Confirmation Dialog */}
+      {/* Success & Account Access Confirmation Dialog */}
       <Dialog open={isSuccessDialogOpen} onOpenChange={setIsSuccessDialogOpen}>
-        <DialogContent className="w-[92vw] max-w-md rounded-[28px] p-6 sm:p-8 bg-[#FBFBFA] border border-black/10 shadow-2xl text-center">
+        <DialogContent className="w-[95vw] sm:max-w-lg md:max-w-[560px] max-h-[92vh] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-[24px] sm:rounded-[30px] p-6 sm:p-8 bg-[#FBFBFA] border border-black/10 shadow-2xl text-center">
           <div className="mx-auto w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mb-4 shadow-sm">
             <CheckCircle2 className="w-8 h-8 stroke-[2.5]" />
           </div>
@@ -1103,67 +843,93 @@ export function CheckoutButton({
               Payment Confirmed!
             </DialogTitle>
             <DialogDescription className="text-xs text-neutral-600 pt-1.5 leading-relaxed">
-              Your ebook <span className="font-semibold text-neutral-900">&quot;{title}&quot;</span>{" "}
-              has been successfully added to your library.
+              Your eBook <span className="font-semibold text-neutral-900">&quot;{title}&quot;</span> has been successfully added to your library.
             </DialogDescription>
           </DialogHeader>
 
-          {/* Account Credential Information Box */}
+          {/* Account & Delivery Summary Box */}
           <div className="my-5 rounded-2xl bg-white border border-black/10 p-4 text-left space-y-2.5 shadow-sm text-xs">
             <div className="flex items-center justify-between pb-2 border-b border-black/5">
               <span className="font-semibold text-neutral-500">Account Access:</span>
-              <span
-                className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
-                  completedOrder?.isNewAccount
-                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                    : "bg-blue-50 text-blue-700 border-blue-200"
-                }`}
-              >
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                 {completedOrder?.isNewAccount ? "New Account Created" : "Linked to Existing Account"}
               </span>
             </div>
 
-            <div className="flex items-center justify-between">
+            {completedOrder?.userName && (
+              <div className="flex items-center justify-between pb-2 border-b border-black/5">
+                <span className="text-neutral-500 flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-neutral-400" />
+                  <span>Customer Name:</span>
+                </span>
+                <span className="font-medium text-neutral-900">
+                  {completedOrder.userName}
+                </span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pb-2 border-b border-black/5">
               <span className="text-neutral-500 flex items-center gap-1.5">
                 <Phone className="w-3.5 h-3.5 text-neutral-400" />
                 <span>Mobile Login ID:</span>
               </span>
               <span className="font-mono font-bold text-neutral-900">
-                +91 {completedOrder?.userPhone}
+                +91 {completedOrder?.userPhone || guestMobile || userPhone}
               </span>
             </div>
 
-            <div className="flex items-center justify-between">
-              <span className="text-neutral-500 flex items-center gap-1.5">
-                <Mail className="w-3.5 h-3.5 text-neutral-400" />
-                <span>Registered Email:</span>
+            <div className="flex items-center justify-between pb-2 border-b border-black/5 bg-amber-50/70 -mx-4 px-4 py-2">
+              <span className="text-amber-900 font-semibold flex items-center gap-1.5">
+                <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                <span>Temporary Password:</span>
               </span>
-              <span className="font-medium text-neutral-800 truncate max-w-[180px]">
-                {completedOrder?.userEmail}
+              <span className="font-mono font-bold text-amber-900 bg-amber-100/90 px-2 py-0.5 rounded border border-amber-300">
+                {completedOrder?.userPhone || guestMobile || userPhone}
               </span>
             </div>
 
-            <p className="text-[11px] text-neutral-600 pt-1.5 leading-relaxed border-t border-black/5">
-              Your account is ready. You can access your purchased books anytime by signing in with your mobile number and password.
-            </p>
+            {completedOrder?.userEmail && !completedOrder.userEmail.endsWith("@hiddenbooks.in") && (
+              <div className="flex items-center justify-between pb-2 border-b border-black/5">
+                <span className="text-neutral-500 flex items-center gap-1.5">
+                  <Mail className="w-3.5 h-3.5 text-neutral-400" />
+                  <span>Email:</span>
+                </span>
+                <span className="font-medium text-neutral-800 truncate max-w-[180px]">
+                  {completedOrder.userEmail}
+                </span>
+              </div>
+            )}
+
+            <div className="p-3 rounded-xl bg-amber-50/90 border border-amber-200 text-amber-900 text-[11px] leading-relaxed">
+              <span className="font-bold block mb-0.5">⚠️ Login Information:</span>
+              Aapka temporary password aapka phone number (<strong className="font-mono font-bold">+91 {completedOrder?.userPhone || guestMobile || userPhone}</strong>) hai. Kripya user dashboard me jakar apna password change kar lein.
+            </div>
           </div>
 
-          {/* CTA Navigation Buttons */}
+          {/* Navigation CTAs */}
           <div className="space-y-2.5">
             <Button
-              onClick={() => {
-                window.location.href = `/read/${completedOrder?.bookId || bookId}`
-              }}
+              onClick={handleReadNowClick}
+              disabled={loading}
               size="lg"
               className="w-full h-12 rounded-full bg-[#111111] hover:bg-neutral-800 text-white font-bold text-sm shadow-md gap-2"
             >
-              <span>Read Now in Library</span>
-              <ArrowRight className="w-4 h-4" />
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Redirecting to Dashboard...</span>
+                </>
+              ) : (
+                <>
+                  <span>Read Now in Library</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
             </Button>
 
             <Button
               onClick={() => {
-                window.location.href = "/account/library"
+                window.location.href = "/account/library?setup_password=1"
               }}
               variant="outline"
               size="lg"
@@ -1171,97 +937,6 @@ export function CheckoutButton({
             >
               View All Books in My Library
             </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* 3. Coupon Modal Dialog */}
-      <Dialog open={isCouponDialogOpen} onOpenChange={setIsCouponDialogOpen}>
-        <DialogContent className="w-[92vw] max-w-sm rounded-[24px] p-5 sm:p-6 bg-[#FBFBFA]">
-          <DialogHeader>
-            <DialogTitle className="text-lg sm:text-xl font-bold font-serif text-neutral-900 flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-500" />
-              Have a Coupon Code?
-            </DialogTitle>
-            <DialogDescription className="text-xs text-neutral-500 pt-1">
-              Apply a promo code to unlock instant discounts on this edition.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 pt-3">
-            <div className="space-y-1.5">
-              <div className="flex gap-2">
-                <Input
-                  value={couponInput}
-                  onChange={(e) => {
-                    setCouponInput(e.target.value.toUpperCase())
-                    setCouponError(null)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault()
-                      handleApplyCoupon()
-                    }
-                  }}
-                  placeholder="e.g. WELCOME10"
-                  className="uppercase tracking-wider font-mono h-11 text-sm bg-white"
-                />
-                <Button
-                  type="button"
-                  onClick={() => handleApplyCoupon()}
-                  disabled={validatingCoupon || !couponInput.trim()}
-                  className="rounded-xl px-5 h-11 bg-[#111111] hover:bg-neutral-800 font-bold text-xs"
-                >
-                  {validatingCoupon ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    "Apply"
-                  )}
-                </Button>
-              </div>
-
-              {couponError && (
-                <p className="text-[11px] text-red-600 font-medium pl-1">
-                  {couponError}
-                </p>
-              )}
-            </div>
-
-            {/* Popular Promo Suggestions */}
-            <div className="pt-2 border-t border-black/[0.06]">
-              <div className="text-[11px] font-semibold text-neutral-500 mb-2">
-                Available Offers:
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCouponInput("WELCOME10")
-                    handleApplyCoupon("WELCOME10")
-                  }}
-                  className="px-2.5 py-1.5 rounded-lg border border-black/10 bg-white hover:border-black/30 text-left text-xs transition-colors flex items-center gap-1.5"
-                >
-                  <span className="font-mono font-bold text-neutral-900">WELCOME10</span>
-                  <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded">
-                    10% OFF
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCouponInput("FLAT50")
-                    handleApplyCoupon("FLAT50")
-                  }}
-                  className="px-2.5 py-1.5 rounded-lg border border-black/10 bg-white hover:border-black/30 text-left text-xs transition-colors flex items-center gap-1.5"
-                >
-                  <span className="font-mono font-bold text-neutral-900">FLAT50</span>
-                  <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded">
-                    ₹50 OFF
-                  </span>
-                </button>
-              </div>
-            </div>
           </div>
         </DialogContent>
       </Dialog>
